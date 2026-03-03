@@ -1,0 +1,443 @@
+---
+title: Data types
+description: Understanding the data types you can store in Hive
+---
+
+Hive supports a wide range of data types, from primitive values to complex custom objects. This flexibility makes it easy to store any kind of data your application needs.
+
+## Primitive types
+
+Hive natively supports all Dart primitive types without any additional setup:
+
+```dart
+final box = Hive.box();
+
+// Strings
+box.put('name', 'Alice');
+box.put('email', 'alice@example.com');
+
+// Numbers (int, double)
+box.put('age', 30);
+box.put('score', 95.5);
+box.put('balance', 1000);
+
+// Booleans
+box.put('isActive', true);
+box.put('isDarkMode', false);
+```
+
+<Note>
+Hive handles both `int` and `double` as the `num` type internally, so you can store any numeric value without worrying about the specific type.
+</Note>
+
+## Collections
+
+Hive seamlessly stores Dart collections including lists and maps:
+
+### Lists
+
+Store lists of any supported type:
+
+```dart
+final box = Hive.box();
+
+// List of strings
+box.put('tags', ['flutter', 'dart', 'mobile']);
+
+// List of numbers
+box.put('scores', [10, 20, 30, 40]);
+
+// List of booleans
+box.put('flags', [true, false, true]);
+
+// Mixed-type list
+box.put('mixed', ['text', 42, true]);
+
+// Nested lists
+box.put('matrix', [
+  [1, 2, 3],
+  [4, 5, 6],
+  [7, 8, 9],
+]);
+```
+
+### Maps
+
+Store nested data structures with maps:
+
+```dart
+final box = Hive.box();
+
+// Simple map
+box.put('user', {
+  'name': 'Bob',
+  'age': 25,
+  'active': true,
+});
+
+// Nested map
+box.put('config', {
+  'theme': {
+    'mode': 'dark',
+    'primaryColor': '#2196F3',
+  },
+  'notifications': {
+    'email': true,
+    'push': false,
+  },
+});
+
+// Map with list values
+box.put('userGroups', {
+  'admins': ['alice', 'bob'],
+  'users': ['charlie', 'david'],
+});
+```
+
+<Tip>
+Maps in Hive must have string keys. Use `Map<String, dynamic>` for maximum flexibility with nested data.
+</Tip>
+
+## Custom objects
+
+Hive can store your custom Dart classes with minimal setup. Your class needs two things:
+
+1. A `toJson()` method that converts the object to a map
+2. A `fromJson()` factory constructor that creates the object from a map
+
+### Defining a custom class
+
+```dart
+class User {
+  User({
+    required this.name,
+    required this.email,
+    required this.age,
+  });
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      name: json['name'] as String,
+      email: json['email'] as String,
+      age: json['age'] as int,
+    );
+  }
+
+  final String name;
+  final String email;
+  final int age;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'email': email,
+      'age': age,
+    };
+  }
+}
+```
+
+### Registering the adapter
+
+Before you can store custom objects, register them with Hive:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+  
+  // Register the User class
+  Hive.registerAdapter('User', User.fromJson);
+  
+  runApp(MyApp());
+}
+```
+
+<Note>
+The first parameter to `registerAdapter()` is a unique string identifier for your type. Make sure it's unique across your application.
+</Note>
+
+### Storing custom objects
+
+Once registered, use your custom objects just like primitives:
+
+```dart
+final box = Hive.box();
+
+final user = User(
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30,
+);
+
+// Store the object
+box.put('currentUser', user);
+
+// Retrieve the object
+final retrievedUser = box.get('currentUser') as User;
+print(retrievedUser.name); // Alice
+```
+
+### Complex custom objects
+
+Your custom objects can contain other custom objects:
+
+```dart
+class Address {
+  Address({required this.street, required this.city});
+
+  factory Address.fromJson(Map<String, dynamic> json) {
+    return Address(
+      street: json['street'] as String,
+      city: json['city'] as String,
+    );
+  }
+
+  final String street;
+  final String city;
+
+  Map<String, dynamic> toJson() {
+    return {'street': street, 'city': city};
+  }
+}
+
+class Person {
+  Person({required this.name, required this.address});
+
+  factory Person.fromJson(Map<String, dynamic> json) {
+    return Person(
+      name: json['name'] as String,
+      address: Address.fromJson(json['address'] as Map<String, dynamic>),
+    );
+  }
+
+  final String name;
+  final Address address;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'address': address.toJson(),
+    };
+  }
+}
+
+// Register both types
+Hive.registerAdapter('Address', Address.fromJson);
+Hive.registerAdapter('Person', Person.fromJson);
+
+// Use them
+final box = Hive.box();
+final person = Person(
+  name: 'Bob',
+  address: Address(street: '123 Main St', city: 'Springfield'),
+);
+box.put('person', person);
+```
+
+## Type safety
+
+For better type safety, specify the value type when opening a box:
+
+```dart
+// Only strings can be stored in this box
+final stringBox = Hive.box<String>(name: 'strings');
+stringBox.put('greeting', 'Hello');
+stringBox.put('farewell', 'Goodbye');
+// stringBox.put('number', 42); // Compile error!
+
+// Only integers
+final intBox = Hive.box<int>(name: 'numbers');
+intBox.put('count', 10);
+
+// Only User objects
+final userBox = Hive.box<User>(name: 'users');
+userBox.put('alice', User(name: 'Alice', email: 'alice@example.com', age: 30));
+```
+
+<Warning>
+Once you open a box with a specific type parameter, you must always use the same type when accessing it. Opening `Hive.box<String>(name: 'myBox')` after previously opening `Hive.box<int>(name: 'myBox')` will throw an error.
+</Warning>
+
+## Type handling under the hood
+
+Hive uses a type registry to manage custom objects efficiently:
+
+```dart
+// Built-in types are automatically handled
+const builtinTypes = {
+  bool,
+  num,
+  String,
+  List<dynamic>,
+  Map<String, dynamic>,
+};
+```
+
+When you register a custom adapter, Hive:
+1. Generates a unique type ID by hashing the type name
+2. Associates this ID with your `fromJson` function
+3. Stores objects with their type ID for proper deserialization
+
+## Handling nullable values
+
+Hive handles null values gracefully:
+
+```dart
+final box = Hive.box<String?>();
+
+// Store null
+box.put('optional', null);
+
+// Get with null safety
+final value = box.get('optional'); // null
+final withDefault = box.get('missing', defaultValue: 'default'); // 'default'
+
+// Check for null
+if (box.get('optional') == null) {
+  print('Value is null');
+}
+```
+
+## Lists of custom objects
+
+Store lists of your custom types:
+
+```dart
+final box = Hive.box();
+
+final users = [
+  User(name: 'Alice', email: 'alice@example.com', age: 30),
+  User(name: 'Bob', email: 'bob@example.com', age: 25),
+  User(name: 'Charlie', email: 'charlie@example.com', age: 35),
+];
+
+box.put('users', users);
+
+// Retrieve and cast
+final retrievedUsers = (box.get('users') as List).cast<User>();
+for (final user in retrievedUsers) {
+  print(user.name);
+}
+```
+
+## DateTime handling
+
+While Hive doesn't have native DateTime support, you can easily work with dates using ISO 8601 strings:
+
+```dart
+final box = Hive.box();
+
+// Store DateTime as string
+box.put('createdAt', DateTime.now().toIso8601String());
+
+// Retrieve and parse
+final dateString = box.get('createdAt') as String;
+final createdAt = DateTime.parse(dateString);
+```
+
+Or include DateTime in your custom objects:
+
+```dart
+class Event {
+  Event({required this.name, required this.timestamp});
+
+  factory Event.fromJson(Map<String, dynamic> json) {
+    return Event(
+      name: json['name'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+    );
+  }
+
+  final String name;
+  final DateTime timestamp;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'timestamp': timestamp.toIso8601String(),
+    };
+  }
+}
+```
+
+## Enums
+
+Handle enums by converting them to strings:
+
+```dart
+enum UserRole { admin, user, guest }
+
+class UserWithRole {
+  UserWithRole({required this.name, required this.role});
+
+  factory UserWithRole.fromJson(Map<String, dynamic> json) {
+    return UserWithRole(
+      name: json['name'] as String,
+      role: UserRole.values.byName(json['role'] as String),
+    );
+  }
+
+  final String name;
+  final UserRole role;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'role': role.name,
+    };
+  }
+}
+```
+
+## What you cannot store
+
+Some data types are not suitable for Hive:
+
+<Warning>
+**Binary data**: Don't store images, videos, or large binary files directly in Hive. Instead, save them as separate files and store only the file paths in Hive.
+</Warning>
+
+```dart
+// Don't do this
+box.put('image', largeImageBytes); // Bad for performance
+
+// Do this instead
+final path = await saveImageToFile(imageBytes);
+box.put('imagePath', path); // Store only the path
+```
+
+<Warning>
+**Functions and closures**: You cannot serialize functions or closures. Only data objects are supported.
+</Warning>
+
+## Best practices
+
+<Tip>
+**Keep it simple**: Use primitive types and maps when possible. Only create custom classes when you need structure and type safety.
+</Tip>
+
+<Tip>
+**Consistent serialization**: When implementing `toJson()` and `fromJson()`, ensure they are exact inverses of each other.
+</Tip>
+
+<Tip>
+**Validate on deserialization**: Add validation in your `fromJson()` constructors to handle corrupt or unexpected data gracefully.
+</Tip>
+
+```dart
+factory User.fromJson(Map<String, dynamic> json) {
+  // Validate required fields
+  if (!json.containsKey('name') || !json.containsKey('email')) {
+    throw ArgumentError('Missing required fields');
+  }
+  
+  return User(
+    name: json['name'] as String,
+    email: json['email'] as String,
+    age: json['age'] as int? ?? 0, // Provide default
+  );
+}
+```

@@ -1,0 +1,245 @@
+---
+title: Custom type adapters
+description: Learn how to store custom Dart objects in Hive using type adapters
+---
+
+Hive can store any Dart object, not just primitive types. This example shows you how to create and register custom type adapters to serialize and deserialize your objects.
+
+## How custom types work
+
+Hive stores custom objects by converting them to JSON format. Your custom classes need two methods:
+
+- `fromJson()` - Deserializes JSON into an object
+- `toJson()` - Serializes an object into JSON
+
+Once you implement these methods, register your type with Hive using `Hive.registerAdapter()`.
+
+## Create a custom class
+
+Let's create a `Bee` class that represents a bee with a name and role:
+
+```dart
+class Bee {
+  Bee({required this.name, required this.role});
+
+  factory Bee.fromJson(Map<String, dynamic> json) => Bee(
+    name: json['name'] as String,
+    role: json['role'] as String,
+  );
+
+  final String name;
+  final String role;
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'role': role,
+  };
+}
+```
+
+<Note>
+  The `fromJson` factory constructor must accept a `Map<String, dynamic>` parameter, and the `toJson` method must return a `Map<String, dynamic>`.
+</Note>
+
+## Register the adapter
+
+Before you can store `Bee` objects, register the type adapter with Hive:
+
+```dart
+import 'package:hive/hive.dart';
+
+void main() {
+  // Register the Bee type adapter
+  Hive.registerAdapter('Bee', Bee.fromJson);
+  
+  // Now you can use Bee objects in Hive
+}
+```
+
+The `registerAdapter` method takes two parameters:
+
+1. A unique type name string (e.g., 'Bee')
+2. A function that creates an instance from JSON
+
+## Store custom objects
+
+Once registered, you can store and retrieve `Bee` objects just like any other value:
+
+```dart
+final box = Hive.box();
+
+// Create a Bee instance
+final bumble = Bee(name: 'Bumble', role: 'Worker');
+
+// Store it in the box
+box.put('BumbleID', bumble);
+
+// Retrieve it later
+final retrievedBee = box.get('BumbleID');
+print('${retrievedBee.name} - ${retrievedBee.role}'); // Bumble - Worker
+```
+
+<Tip>
+  Hive automatically handles serialization and deserialization using the methods you defined. You don't need to manually call `toJson()` or `fromJson()`.
+</Tip>
+
+## Complete example
+
+Here's a complete example that demonstrates storing multiple bees:
+
+```dart
+import 'package:hive/hive.dart';
+
+class Bee {
+  Bee({required this.name, required this.role});
+
+  factory Bee.fromJson(Map<String, dynamic> json) => Bee(
+    name: json['name'] as String,
+    role: json['role'] as String,
+  );
+
+  final String name;
+  final String role;
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'role': role,
+  };
+
+  @override
+  String toString() => '$name ($role)';
+}
+
+void main() {
+  // Set up Hive directory
+  Hive.defaultDirectory = './hive_data';
+  
+  // Register the Bee type adapter
+  Hive.registerAdapter('Bee', Bee.fromJson);
+  
+  // Open a box
+  final box = Hive.box();
+  
+  // Create and store multiple bees
+  final bees = [
+    Bee(name: 'Bumble', role: 'Worker'),
+    Bee(name: 'Honey', role: 'Forager'),
+    Bee(name: 'Queen Bee', role: 'Queen'),
+  ];
+  
+  for (final bee in bees) {
+    box.put(bee.name, bee);
+  }
+  
+  // Retrieve all bees
+  print('Bees in the hive:');
+  for (final key in box.keys) {
+    final bee = box.get(key) as Bee;
+    print('  $bee');
+  }
+  
+  // Clean up
+  box.close();
+}
+```
+
+## Complex custom types
+
+You can also store objects with nested structures and lists:
+
+```dart
+class Hive {
+  Hive({required this.name, required this.bees});
+
+  factory Hive.fromJson(Map<String, dynamic> json) => Hive(
+    name: json['name'] as String,
+    bees: (json['bees'] as List<dynamic>)
+        .map((e) => Bee.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+
+  final String name;
+  final List<Bee> bees;
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'bees': bees.map((bee) => bee.toJson()).toList(),
+  };
+}
+```
+
+Register both types:
+
+```dart
+Hive.registerAdapter('Bee', Bee.fromJson);
+Hive.registerAdapter('Hive', Hive.fromJson);
+```
+
+<Note>
+  When working with nested custom types, make sure to register all types before storing any objects.
+</Note>
+
+## Type safety with boxes
+
+You can create type-safe boxes that only accept specific custom types:
+
+```dart
+// Create a box that only stores Bee objects
+final beeBox = Hive.box<Bee>(name: 'bees');
+
+// This works
+beeBox.put('worker1', Bee(name: 'Buzzy', role: 'Worker'));
+
+// This would cause a compile-time error
+// beeBox.put('invalid', 'not a bee'); // Error!
+```
+
+## Best practices
+
+<Steps>
+  <Step title="Keep type names unique">
+    Use descriptive, unique names when registering adapters to avoid conflicts.
+  </Step>
+  
+  <Step title="Register early">
+    Register all type adapters before opening any boxes that might contain those types.
+  </Step>
+  
+  <Step title="Handle versioning">
+    When updating your class structure, ensure backward compatibility or migrate existing data.
+  </Step>
+  
+  <Step title="Avoid complex logic">
+    Keep `toJson()` and `fromJson()` methods simple. Complex logic can slow down serialization.
+  </Step>
+</Steps>
+
+## What gets serialized
+
+Only the data you explicitly include in `toJson()` gets stored. This allows you to:
+
+- Exclude computed properties
+- Store only essential data
+- Keep your database size small
+
+```dart
+class Bee {
+  final String name;
+  final String role;
+  
+  // This computed property won't be stored
+  bool get isWorker => role == 'Worker';
+  
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'role': role,
+    // isWorker is not included
+  };
+}
+```
+
+## Next steps
+
+- Try creating more complex object hierarchies
+- Implement data migration when your models change
+- Combine custom types with [encryption](/examples/encrypted-box) for secure storage

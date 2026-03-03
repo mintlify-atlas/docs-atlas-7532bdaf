@@ -1,0 +1,342 @@
+---
+title: Encryption
+description: Secure your data with built-in 256-bit AES encryption
+---
+
+Hive provides built-in encryption to protect sensitive data at rest. With a single parameter, you can encrypt entire boxes using industry-standard 256-bit AES encryption.
+
+## How encryption works
+
+When you enable encryption, Hive uses **256-bit AES in CBC mode** to secure your data. Each database page is encrypted separately, providing strong protection while maintaining good performance.
+
+Key features:
+- **256-bit AES encryption**: Industry-standard security
+- **CBC mode**: Cipher Block Chaining for enhanced security
+- **Per-page encryption**: Each database page is encrypted independently
+- **Automatic handling**: Encryption and decryption happen transparently
+- **SQLite backend**: Encrypted boxes use SQLite storage for optimal security
+
+<Note>
+When you provide an `encryptionKey`, Hive automatically switches to using SQLite as the storage engine. Non-encrypted boxes use the faster Isar engine.
+</Note>
+
+## Enabling encryption
+
+To encrypt a box, simply provide an encryption key when opening it:
+
+```dart
+final box = Hive.box(
+  name: 'secureBox',
+  encryptionKey: 'your-256-bit-encryption-key-here',
+);
+
+// Use the box normally
+box.put('password', 'super-secret');
+box.put('apiToken', 'sk_live_abc123');
+```
+
+The encryption key must be a string. For maximum security, use a properly generated 256-bit key.
+
+<Warning>
+**Keep your encryption key safe!** If you lose the key, there's no way to recover the encrypted data. Store it securely using platform-specific secure storage solutions.
+</Warning>
+
+## Generating secure encryption keys
+
+For maximum security, generate a cryptographically secure random key:
+
+```dart
+import 'dart:convert';
+import 'dart:math';
+
+String generateSecureKey() {
+  final random = Random.secure();
+  final values = List<int>.generate(32, (i) => random.nextInt(256));
+  return base64Url.encode(values);
+}
+
+// Generate once and store securely
+final encryptionKey = generateSecureKey();
+final box = Hive.box(
+  name: 'encrypted',
+  encryptionKey: encryptionKey,
+);
+```
+
+<Tip>
+Generate the encryption key once during app setup and store it using flutter_secure_storage or a similar secure storage solution. Never hardcode keys in your source code.
+</Tip>
+
+## Storing encryption keys securely
+
+Use platform-specific secure storage to persist encryption keys:
+
+```dart
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+class SecureKeyManager {
+  static const _storage = FlutterSecureStorage();
+  static const _keyName = 'hive_encryption_key';
+
+  // Get or generate the encryption key
+  static Future<String> getEncryptionKey() async {
+    // Try to retrieve existing key
+    String? key = await _storage.read(key: _keyName);
+    
+    if (key == null) {
+      // Generate new key if none exists
+      key = generateSecureKey();
+      await _storage.write(key: _keyName, value: key);
+    }
+    
+    return key;
+  }
+
+  static String generateSecureKey() {
+    final random = Random.secure();
+    final values = List<int>.generate(32, (i) => random.nextInt(256));
+    return base64Url.encode(values);
+  }
+}
+
+// Use in your app
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+  
+  // Get the secure encryption key
+  final encryptionKey = await SecureKeyManager.getEncryptionKey();
+  
+  // Open encrypted box
+  final box = Hive.box(
+    name: 'userData',
+    encryptionKey: encryptionKey,
+  );
+  
+  runApp(MyApp());
+}
+```
+
+## When to use encryption
+
+Encrypt boxes that contain sensitive information:
+
+### User credentials
+
+```dart
+final authBox = Hive.box(
+  name: 'auth',
+  encryptionKey: await SecureKeyManager.getEncryptionKey(),
+);
+
+authBox.put('accessToken', 'jwt_token_here');
+authBox.put('refreshToken', 'refresh_token_here');
+authBox.put('apiKey', 'api_key_here');
+```
+
+### Personal information
+
+```dart
+final personalBox = Hive.box(
+  name: 'personal',
+  encryptionKey: await SecureKeyManager.getEncryptionKey(),
+);
+
+personalBox.put('email', 'user@example.com');
+personalBox.put('phoneNumber', '+1234567890');
+personalBox.put('address', {
+  'street': '123 Main St',
+  'city': 'Springfield',
+});
+```
+
+### Financial data
+
+```dart
+final financialBox = Hive.box(
+  name: 'financial',
+  encryptionKey: await SecureKeyManager.getEncryptionKey(),
+);
+
+financialBox.put('creditCard', '****-****-****-1234');
+financialBox.put('bankAccount', 'encrypted_account_info');
+```
+
+<Tip>
+Not all data needs encryption. Only encrypt boxes containing sensitive information. Non-encrypted boxes are faster and use less storage.
+</Tip>
+
+## Encryption key requirements
+
+When opening an encrypted box, you must provide the same encryption key that was used originally:
+
+```dart
+// First time - create encrypted box
+final box1 = Hive.box(
+  name: 'secure',
+  encryptionKey: 'my-secure-key-123',
+);
+box1.put('data', 'sensitive');
+box1.close();
+
+// Later - reopen with same key
+final box2 = Hive.box(
+  name: 'secure',
+  encryptionKey: 'my-secure-key-123', // Must match!
+);
+print(box2.get('data')); // sensitive
+```
+
+<Warning>
+If you try to open an encrypted box with the wrong key or without a key, Hive will throw an error. There's no way to access encrypted data without the correct key.
+</Warning>
+
+## Mixing encrypted and unencrypted boxes
+
+You can use both encrypted and unencrypted boxes in the same app:
+
+```dart
+final key = await SecureKeyManager.getEncryptionKey();
+
+// Encrypted box for sensitive data
+final secureBox = Hive.box(
+  name: 'secure',
+  encryptionKey: key,
+);
+
+// Regular box for non-sensitive data
+final cacheBox = Hive.box(
+  name: 'cache',
+  // No encryption key - faster performance
+);
+
+secureBox.put('token', 'secret_token');
+cacheBox.put('theme', 'dark'); // No need to encrypt UI preferences
+```
+
+## Performance considerations
+
+Encryption has a small performance cost:
+
+- **Write operations**: Slightly slower due to encryption overhead
+- **Read operations**: Slightly slower due to decryption overhead
+- **Storage**: Encrypted boxes use SQLite backend (slightly larger files)
+
+For most applications, the performance impact is negligible. However, if you're storing non-sensitive data, consider using unencrypted boxes for maximum performance.
+
+```dart
+// Fast, unencrypted cache
+final cache = Hive.box(name: 'cache');
+cache.put('lastSync', DateTime.now().toIso8601String());
+
+// Secure, encrypted credentials
+final auth = Hive.box(
+  name: 'auth',
+  encryptionKey: encryptionKey,
+);
+auth.put('password', 'hashed_password');
+```
+
+<Note>
+The performance difference between encrypted and unencrypted boxes is typically measured in microseconds. Only optimize for performance if you have specific requirements.
+</Note>
+
+## Storage backend differences
+
+Hive uses different storage engines based on encryption:
+
+| Encryption | Storage Engine | File Extension |
+|------------|----------------|----------------|
+| Disabled   | Isar           | `.isar`        |
+| Enabled    | SQLite         | `.sqlite`      |
+
+```dart
+// Uses Isar engine → myBox.isar
+final box1 = Hive.box(name: 'myBox');
+
+// Uses SQLite engine → secureBox.sqlite
+final box2 = Hive.box(
+  name: 'secureBox',
+  encryptionKey: 'key',
+);
+```
+
+Both engines provide the same API and functionality. The choice is automatically made based on whether you provide an encryption key.
+
+## Data at rest protection
+
+Encryption protects your data at rest:
+
+- **File system access**: Even if someone accesses the device storage, they cannot read encrypted data without the key
+- **Backup protection**: Encrypted boxes remain secure in device backups
+- **Device compromise**: Stolen or lost devices don't expose sensitive data
+
+<Warning>
+**Encryption only protects data at rest.** Once decrypted in memory, data is accessible to your application. Implement additional security measures for data in memory if needed.
+</Warning>
+
+## Best practices
+
+<Tip>
+**Use secure storage for keys**: Never hardcode encryption keys. Use flutter_secure_storage or platform keychain/keystore.
+</Tip>
+
+<Tip>
+**Generate strong keys**: Use cryptographically secure random number generators for key generation.
+</Tip>
+
+<Tip>
+**Encrypt selectively**: Only encrypt boxes with sensitive data. Keep non-sensitive data in faster, unencrypted boxes.
+</Tip>
+
+<Tip>
+**Plan for key rotation**: Consider how you'll handle encryption key changes. This typically involves decrypting data with the old key and re-encrypting with a new one.
+</Tip>
+
+<Warning>
+**Back up keys securely**: If users need to restore data on a new device, ensure your key backup strategy is secure and complies with privacy regulations.
+</Warning>
+
+## Key rotation example
+
+If you need to change encryption keys:
+
+```dart
+Future<void> rotateEncryptionKey(String oldKey, String newKey) async {
+  // Open box with old key
+  final oldBox = Hive.box(name: 'data', encryptionKey: oldKey);
+  
+  // Read all data
+  final allData = <String, dynamic>{};
+  for (final key in oldBox.keys) {
+    allData[key] = oldBox.get(key);
+  }
+  
+  // Close and delete old box
+  oldBox.deleteFromDisk();
+  
+  // Create new box with new key
+  final newBox = Hive.box(name: 'data', encryptionKey: newKey);
+  
+  // Write all data to new box
+  newBox.putAll(allData);
+  
+  // Update stored key
+  await SecureKeyManager.updateKey(newKey);
+}
+```
+
+## Compliance and regulations
+
+Hive's 256-bit AES encryption meets common security standards:
+
+- **GDPR**: Helps satisfy data protection requirements
+- **HIPAA**: Suitable for healthcare data protection
+- **PCI DSS**: Meets encryption standards for payment data
+- **SOC 2**: Supports security compliance requirements
+
+<Note>
+While Hive provides strong encryption, ensuring compliance requires a comprehensive security strategy. Consult security professionals for regulated data.
+</Note>

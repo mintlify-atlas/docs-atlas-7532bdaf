@@ -1,0 +1,193 @@
+---
+title: "Hive"
+description: "Main entry point for opening boxes and registering adapters"
+---
+
+## Overview
+
+The `Hive` class is the main entry point for working with Hive. It provides methods for opening boxes, registering type adapters, and managing the lifecycle of boxes.
+
+## Properties
+
+### defaultDirectory
+
+```dart
+static String? defaultDirectory
+```
+
+The default directory for all boxes. If no directory is specified when opening a box, this directory will be used.
+
+<CodeGroup>
+```dart Example
+Hive.defaultDirectory = '/path/to/storage';
+```
+</CodeGroup>
+
+## Methods
+
+### box()
+
+Get or open a box with the specified configuration. If the box is already open, the same instance is returned.
+
+```dart
+static Box<E> box<E>({
+  String name = 'hive',
+  String? directory,
+  String? encryptionKey,
+  int maxSizeMiB = 5,
+})
+```
+
+<ParamField path="name" type="String" default="'hive'">
+  The name of the box. If not specified, the default name `'hive'` is used.
+</ParamField>
+
+<ParamField path="directory" type="String?">
+  The directory where the box is stored. If not specified, `defaultDirectory` is used. If neither is set, an error is thrown.
+</ParamField>
+
+<ParamField path="encryptionKey" type="String?">
+  The encryption key used to encrypt the box data. If provided, the box will be encrypted. If the box was already opened with a different encryption key, an error is thrown.
+</ParamField>
+
+<ParamField path="maxSizeMiB" type="int" default="5">
+  The maximum size of the box in MiB. If the box grows bigger than this, an exception is thrown. It is recommended to set this value to a small value if possible.
+</ParamField>
+
+<CodeGroup>
+```dart Basic usage
+final box = Hive.box<String>();
+```
+
+```dart Named box
+final userBox = Hive.box<User>(name: 'users');
+```
+
+```dart With encryption
+final secureBox = Hive.box<String>(
+  name: 'secrets',
+  encryptionKey: 'my-secret-key',
+);
+```
+
+```dart Custom size limit
+final largeBox = Hive.box<Data>(
+  name: 'large_data',
+  maxSizeMiB: 50,
+);
+```
+</CodeGroup>
+
+### registerAdapter()
+
+Registers a type adapter to allow Hive to serialize and deserialize your custom objects.
+
+```dart
+static void registerAdapter<T>(
+  String typeName,
+  T? Function(dynamic json) fromJson,
+)
+```
+
+<ParamField path="typeName" type="String" required>
+  The unique name for this type. This name is used internally to identify the type.
+</ParamField>
+
+<ParamField path="fromJson" type="T? Function(dynamic json)" required>
+  A factory function that creates an instance of type `T` from JSON data. This function is called during deserialization.
+</ParamField>
+
+<CodeGroup>
+```dart Register adapter
+class Person {
+  String name;
+  int age;
+
+  factory Person.fromJson(Map<String, dynamic> json) {
+    return Person()
+      ..name = json['name'] as String
+      ..age = json['age'] as int;
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'age': age,
+    };
+  }
+}
+
+Hive.registerAdapter('Person', Person.fromJson);
+```
+</CodeGroup>
+
+### compute()
+
+Runs a computation in a new isolate and returns the result. This method automatically initializes Hive in the new isolate and closes all boxes afterwards.
+
+```dart
+static Future<T> compute<T>(
+  FutureOr<T> Function() computation, {
+  String? debugName,
+})
+```
+
+<ParamField path="computation" type="FutureOr<T> Function()" required>
+  The function to run in the isolate. This function can be synchronous or asynchronous.
+</ParamField>
+
+<ParamField path="debugName" type="String?">
+  An optional name for the isolate used in debuggers. If not specified, defaults to `'Hive Isolate'`.
+</ParamField>
+
+<CodeGroup>
+```dart Basic compute
+final result = await Hive.compute(() {
+  final box = Hive.box<String>();
+  return box.get('key');
+});
+```
+
+```dart With debug name
+final processed = await Hive.compute(
+  () async {
+    final box = Hive.box<Data>();
+    // Heavy computation
+    return processData(box.getAll());
+  },
+  debugName: 'Data Processor',
+);
+```
+</CodeGroup>
+
+### closeAllBoxes()
+
+Closes all open boxes. This method should be called when you no longer need access to any boxes.
+
+```dart
+static void closeAllBoxes()
+```
+
+<CodeGroup>
+```dart Close all boxes
+Hive.closeAllBoxes();
+```
+</CodeGroup>
+
+### deleteAllBoxesFromDisk()
+
+Closes all open boxes and deletes their data from disk. If a box is still open in another isolate, it will not be deleted.
+
+```dart
+static void deleteAllBoxesFromDisk()
+```
+
+<Warning>
+  This operation is irreversible. All data in all boxes will be permanently deleted.
+</Warning>
+
+<CodeGroup>
+```dart Delete all boxes
+Hive.deleteAllBoxesFromDisk();
+```
+</CodeGroup>

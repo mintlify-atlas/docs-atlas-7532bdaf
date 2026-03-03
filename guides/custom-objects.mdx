@@ -1,0 +1,563 @@
+---
+title: Custom objects
+description: Learn how to store custom Dart objects by registering adapters with fromJson and toJson
+---
+
+Hive can store any custom Dart object, not just primitives and collections. By implementing `fromJson()` and `toJson()` methods, you can seamlessly persist your domain objects.
+
+## Basic object serialization
+
+To store custom objects in Hive, your class needs two methods:
+- `factory fromJson(Map<String, dynamic> json)` - Deserialize from JSON
+- `Map<String, dynamic> toJson()` - Serialize to JSON
+
+<Steps>
+  <Step title="Define your class">
+    ```dart
+    class User {
+      final String name;
+      final int age;
+      final String email;
+
+      User({
+        required this.name,
+        required this.age,
+        required this.email,
+      });
+
+      factory User.fromJson(Map<String, dynamic> json) {
+        return User(
+          name: json['name'] as String,
+          age: json['age'] as int,
+          email: json['email'] as String,
+        );
+      }
+
+      Map<String, dynamic> toJson() {
+        return {
+          'name': name,
+          'age': age,
+          'email': email,
+        };
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Register the adapter">
+    Before using your custom class, register it with Hive:
+
+    ```dart
+    void main() async {
+      WidgetsFlutterBinding.ensureInitialized();
+      final dir = await getApplicationDocumentsDirectory();
+      Hive.defaultDirectory = dir.path;
+
+      // Register the User adapter
+      Hive.registerAdapter('User', User.fromJson);
+
+      runApp(MyApp());
+    }
+    ```
+  </Step>
+
+  <Step title="Store and retrieve objects">
+    ```dart
+    final box = Hive.box();
+
+    // Store a user
+    final user = User(
+      name: 'Alice',
+      age: 25,
+      email: 'alice@example.com',
+    );
+    box.put('currentUser', user);
+
+    // Retrieve the user
+    final retrieved = box.get('currentUser') as User?;
+    if (retrieved != null) {
+      print('${retrieved.name}, ${retrieved.age}');
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complex objects
+
+Handle objects with nested structures and collections:
+
+```dart
+class Task {
+  final String id;
+  final String title;
+  final bool completed;
+  final List<String> tags;
+  final DateTime createdAt;
+  final Map<String, dynamic>? metadata;
+
+  Task({
+    required this.id,
+    required this.title,
+    required this.completed,
+    required this.tags,
+    required this.createdAt,
+    this.metadata,
+  });
+
+  factory Task.fromJson(Map<String, dynamic> json) {
+    return Task(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      completed: json['completed'] as bool,
+      tags: (json['tags'] as List).cast<String>(),
+      createdAt: DateTime.parse(json['createdAt'] as String),
+      metadata: json['metadata'] as Map<String, dynamic>?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'completed': completed,
+      'tags': tags,
+      'createdAt': createdAt.toIso8601String(),
+      if (metadata != null) 'metadata': metadata,
+    };
+  }
+}
+
+// Register and use
+Hive.registerAdapter('Task', Task.fromJson);
+
+final box = Hive.box();
+box.put('task_1', Task(
+  id: '1',
+  title: 'Learn Hive',
+  completed: true,
+  tags: ['flutter', 'database'],
+  createdAt: DateTime.now(),
+));
+```
+
+## Nested objects
+
+Store objects that contain other custom objects:
+
+```dart
+class Address {
+  final String street;
+  final String city;
+  final String country;
+
+  Address({required this.street, required this.city, required this.country});
+
+  factory Address.fromJson(Map<String, dynamic> json) => Address(
+    street: json['street'] as String,
+    city: json['city'] as String,
+    country: json['country'] as String,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'street': street,
+    'city': city,
+    'country': country,
+  };
+}
+
+class Person {
+  final String name;
+  final Address address;
+  final List<Address> previousAddresses;
+
+  Person({
+    required this.name,
+    required this.address,
+    required this.previousAddresses,
+  });
+
+  factory Person.fromJson(Map<String, dynamic> json) => Person(
+    name: json['name'] as String,
+    address: Address.fromJson(json['address'] as Map<String, dynamic>),
+    previousAddresses: (json['previousAddresses'] as List)
+        .map((e) => Address.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'address': address.toJson(),
+    'previousAddresses': previousAddresses.map((e) => e.toJson()).toList(),
+  };
+}
+
+// Register both types
+Hive.registerAdapter('Address', Address.fromJson);
+Hive.registerAdapter('Person', Person.fromJson);
+```
+
+## Type naming
+
+Choose descriptive and unique type names when registering adapters:
+
+<CodeGroup>
+```dart Good names
+Hive.registerAdapter('User', User.fromJson);
+Hive.registerAdapter('Task', Task.fromJson);
+Hive.registerAdapter('Settings', Settings.fromJson);
+```
+
+```dart Avoid conflicts
+// Bad: Generic names that might clash
+Hive.registerAdapter('Data', MyData.fromJson);
+Hive.registerAdapter('Object', MyObject.fromJson);
+
+// Good: Specific, namespaced names
+Hive.registerAdapter('AppData', MyData.fromJson);
+Hive.registerAdapter('UserObject', MyObject.fromJson);
+```
+
+```dart Versioning
+// Include version info if schema might change
+Hive.registerAdapter('User_v2', UserV2.fromJson);
+Hive.registerAdapter('Task_v1', Task.fromJson);
+```
+</CodeGroup>
+
+## Collections of objects
+
+Store lists and maps of custom objects:
+
+<Tabs>
+  <Tab title="Lists">
+    ```dart
+    final box = Hive.box();
+
+    // Store a list of users
+    final users = [
+      User(name: 'Alice', age: 25, email: 'alice@example.com'),
+      User(name: 'Bob', age: 30, email: 'bob@example.com'),
+      User(name: 'Charlie', age: 35, email: 'charlie@example.com'),
+    ];
+
+    box.put('allUsers', users);
+
+    // Retrieve the list
+    final retrieved = box.get('allUsers') as List?;
+    if (retrieved != null) {
+      final userList = retrieved.cast<User>();
+      for (final user in userList) {
+        print('${user.name}: ${user.email}');
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Maps">
+    ```dart
+    final box = Hive.box();
+
+    // Store a map of users
+    final userMap = {
+      'user1': User(name: 'Alice', age: 25, email: 'alice@example.com'),
+      'user2': User(name: 'Bob', age: 30, email: 'bob@example.com'),
+    };
+
+    box.put('userDirectory', userMap);
+
+    // Retrieve the map
+    final retrieved = box.get('userDirectory') as Map?;
+    if (retrieved != null) {
+      final directory = retrieved.cast<String, User>();
+      directory.forEach((id, user) {
+        print('$id: ${user.name}');
+      });
+    }
+    ```
+  </Tab>
+
+  <Tab title="Using add()">
+    ```dart
+    final box = Hive.box();
+
+    // Add multiple objects with auto-generated keys
+    box.addAll([
+      User(name: 'Alice', age: 25, email: 'alice@example.com'),
+      User(name: 'Bob', age: 30, email: 'bob@example.com'),
+      User(name: 'Charlie', age: 35, email: 'charlie@example.com'),
+    ]);
+
+    // Retrieve by index
+    for (var i = 0; i < box.length; i++) {
+      final user = box.getAt(i) as User;
+      print(user.name);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Handling nullability
+
+Properly handle nullable fields:
+
+```dart
+class Profile {
+  final String username;
+  final String? bio;
+  final String? avatarUrl;
+  final DateTime? lastLogin;
+
+  Profile({
+    required this.username,
+    this.bio,
+    this.avatarUrl,
+    this.lastLogin,
+  });
+
+  factory Profile.fromJson(Map<String, dynamic> json) {
+    return Profile(
+      username: json['username'] as String,
+      bio: json['bio'] as String?,
+      avatarUrl: json['avatarUrl'] as String?,
+      lastLogin: json['lastLogin'] != null
+          ? DateTime.parse(json['lastLogin'] as String)
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'username': username,
+      if (bio != null) 'bio': bio,
+      if (avatarUrl != null) 'avatarUrl': avatarUrl,
+      if (lastLogin != null) 'lastLogin': lastLogin!.toIso8601String(),
+    };
+  }
+}
+```
+
+## Migration strategies
+
+Handle schema changes over time:
+
+```dart
+class UserV2 {
+  final String name;
+  final int age;
+  final String email;
+  final bool verified; // New field
+
+  UserV2({
+    required this.name,
+    required this.age,
+    required this.email,
+    this.verified = false,
+  });
+
+  factory UserV2.fromJson(Map<String, dynamic> json) {
+    return UserV2(
+      name: json['name'] as String,
+      age: json['age'] as int,
+      email: json['email'] as String,
+      // Provide default for missing field
+      verified: json['verified'] as bool? ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'age': age,
+      'email': email,
+      'verified': verified,
+    };
+  }
+}
+```
+
+## Best practices
+
+<Steps>
+  <Step title="Register adapters early">
+    Register all adapters before opening any boxes:
+
+    ```dart
+    void main() async {
+      WidgetsFlutterBinding.ensureInitialized();
+      final dir = await getApplicationDocumentsDirectory();
+      Hive.defaultDirectory = dir.path;
+
+      // Register all adapters
+      Hive.registerAdapter('User', User.fromJson);
+      Hive.registerAdapter('Task', Task.fromJson);
+      Hive.registerAdapter('Settings', Settings.fromJson);
+
+      runApp(MyApp());
+    }
+    ```
+  </Step>
+
+  <Step title="Use immutable objects">
+    Make your objects immutable for better safety:
+
+    ```dart
+    class User {
+      const User({required this.name, required this.age});
+
+      final String name;
+      final int age;
+
+      // Add copyWith for updates
+      User copyWith({String? name, int? age}) {
+        return User(
+          name: name ?? this.name,
+          age: age ?? this.age,
+        );
+      }
+
+      factory User.fromJson(Map<String, dynamic> json) => User(
+        name: json['name'] as String,
+        age: json['age'] as int,
+      );
+
+      Map<String, dynamic> toJson() => {'name': name, 'age': age};
+    }
+    ```
+  </Step>
+
+  <Step title="Type-safe boxes">
+    Use typed boxes for better type safety:
+
+    ```dart
+    final userBox = Hive.box<User>(name: 'users');
+
+    userBox.put('current', User(name: 'Alice', age: 25));
+
+    // Returns User?, not dynamic
+    final user = userBox.get('current');
+    ```
+  </Step>
+
+  <Step title="Error handling">
+    Handle serialization errors gracefully:
+
+    ```dart
+    factory User.fromJson(Map<String, dynamic> json) {
+      try {
+        return User(
+          name: json['name'] as String,
+          age: json['age'] as int,
+          email: json['email'] as String,
+        );
+      } catch (e) {
+        throw FormatException('Failed to parse User: $e');
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Common patterns
+
+<CodeGroup>
+```dart Enums
+enum UserRole {
+  admin,
+  user,
+  guest;
+
+  String toJson() => name;
+
+  static UserRole fromJson(String value) {
+    return UserRole.values.firstWhere((e) => e.name == value);
+  }
+}
+
+class User {
+  final String name;
+  final UserRole role;
+
+  User({required this.name, required this.role});
+
+  factory User.fromJson(Map<String, dynamic> json) => User(
+    name: json['name'] as String,
+    role: UserRole.fromJson(json['role'] as String),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'role': role.toJson(),
+  };
+}
+```
+
+```dart DateTime
+class Event {
+  final String title;
+  final DateTime startTime;
+  final DateTime? endTime;
+
+  Event({required this.title, required this.startTime, this.endTime});
+
+  factory Event.fromJson(Map<String, dynamic> json) => Event(
+    title: json['title'] as String,
+    startTime: DateTime.parse(json['startTime'] as String),
+    endTime: json['endTime'] != null
+        ? DateTime.parse(json['endTime'] as String)
+        : null,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'startTime': startTime.toIso8601String(),
+    if (endTime != null) 'endTime': endTime!.toIso8601String(),
+  };
+}
+```
+
+```dart Inheritance
+abstract class Animal {
+  final String name;
+
+  Animal(this.name);
+
+  Map<String, dynamic> toJson();
+}
+
+class Dog extends Animal {
+  final String breed;
+
+  Dog({required super.name, required this.breed});
+
+  factory Dog.fromJson(Map<String, dynamic> json) => Dog(
+    name: json['name'] as String,
+    breed: json['breed'] as String,
+  );
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'dog',
+    'name': name,
+    'breed': breed,
+  };
+}
+
+class Cat extends Animal {
+  final bool indoor;
+
+  Cat({required super.name, required this.indoor});
+
+  factory Cat.fromJson(Map<String, dynamic> json) => Cat(
+    name: json['name'] as String,
+    indoor: json['indoor'] as bool,
+  );
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'cat',
+    'name': name,
+    'indoor': indoor,
+  };
+}
+```
+</CodeGroup>

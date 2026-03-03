@@ -1,0 +1,159 @@
+---
+title: Introduction
+description: Fast, enjoyable, and secure NoSQL database for Flutter and Dart
+---
+
+# Welcome to Hive
+
+Hive is a lightweight and buzzing-fast key-value database made for Flutter and Dart. Built on top of Isar, it provides a simple, intuitive API for storing and retrieving data with exceptional performance.
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with Hive in under 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Hive and its dependencies in your project
+  </Card>
+  <Card title="Opening boxes" icon="box" href="/guides/opening-boxes">
+    Learn how to open and manage boxes
+  </Card>
+</CardGroup>
+
+## What is Hive?
+
+Hive organizes data into containers called **boxes**. Think of boxes as tables you'd find in SQL, but far more flexible — they don't stick to a set structure and can contain a variety of data types. At its core, a box is a persisted `Map<String, dynamic>` that makes storing and retrieving data incredibly straightforward.
+
+```dart
+import 'package:hive/hive.dart';
+
+final box = Hive.box();
+box.put('name', 'David');
+
+final name = box.get('name');
+print('Name: $name'); // Name: David
+```
+
+## Why choose Hive?
+
+Hive strikes the perfect balance between simplicity and power. Whether you're building a mobile app, desktop application, or web project, Hive provides the speed and flexibility you need without the complexity of traditional databases.
+
+<Note>
+  Hive is built on top of Isar, a high-performance database engine. If you need advanced features like queries, relations, and indexes, consider using [Isar](https://isar.dev) directly.
+</Note>
+
+## Key features
+
+### Cross-platform support
+
+Run Hive everywhere: mobile, desktop, and browser. Write your code once and deploy it across iOS, Android, Windows, macOS, Linux, and the web with zero platform-specific changes.
+
+### Blazing fast performance
+
+Hive is optimized for mobile devices and delivers exceptional performance. Built on Isar's high-performance engine, it handles thousands of operations per second with minimal resource usage.
+
+### Intuitive API
+
+Hive's API is designed to be sweet and powerful. No complex queries or schemas — just straightforward key-value operations that feel natural to Dart developers.
+
+```dart
+// Simple and intuitive
+box.put('user', {'name': 'Alice', 'age': 28});
+box['score'] = 1000;
+box.add('Daisy');
+```
+
+### Built-in encryption
+
+Protect sensitive data with AES-256 encryption in CBC mode. Every database page is encrypted separately, ensuring your data remains secure.
+
+```dart
+final secureBox = Hive.box(
+  name: 'secrets',
+  encryptionKey: 'your-256-bit-key',
+);
+```
+
+### Multi-isolate support
+
+Access your boxes from multiple isolates simultaneously. Hive handles synchronization automatically, making it perfect for keeping database operations off your UI thread.
+
+```dart
+await Hive.compute(() {
+  final box = Hive.box();
+  // Runs in a separate isolate
+  box.put('processed', true);
+});
+```
+
+### Type safety
+
+Optional generic type parameters ensure your boxes only contain the data types you expect, catching errors at compile time.
+
+```dart
+final box = Hive.box<String>(name: 'strings');
+box.put('greeting', 'Hello');
+box.put('count', 42); // Compile error!
+```
+
+### Custom objects
+
+Store your own Dart objects with minimal boilerplate. Just add `fromJson` and `toJson` methods, register the adapter, and you're ready to go.
+
+```dart
+class Bee {
+  Bee({required this.name, required this.role});
+
+  factory Bee.fromJson(Map<String, dynamic> json) => Bee(
+    name: json['name'] as String,
+    role: json['role'] as String,
+  );
+
+  final String name;
+  final String role;
+
+  Map<String, dynamic> toJson() => {'name': name, 'role': role};
+}
+
+Hive.registerAdapter('Bee', Bee.fromJson);
+box.put('worker', Bee(name: 'Bumble', role: 'Worker'));
+```
+
+### Flexible data access
+
+Access your data as a map or as a list — whichever fits your use case better. Hive supports both paradigms seamlessly.
+
+```dart
+// Map-style access
+box.put('flower', 'Rose');
+box['color'] = 'Red';
+
+// List-style access
+box.add('Lily');
+box.add('Tulip');
+print(box.getAt(0)); // Lily
+```
+
+## When to use Hive
+
+Hive is perfect for:
+
+- **Settings and preferences** - Store user preferences and app configuration
+- **Local caching** - Cache API responses and offline data
+- **Simple data storage** - Key-value pairs, lists, and nested objects
+- **Rapid prototyping** - Get your app working quickly without database overhead
+- **Offline-first apps** - Build apps that work seamlessly without internet
+
+<Note>
+  If you need advanced features like complex queries, full-text search, or relationships between entities, consider using [Isar](https://isar.dev) instead. Hive is a lightweight wrapper around Isar focused on simplicity.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install Hive" icon="download" href="/installation">
+    Add Hive to your Flutter or Dart project
+  </Card>
+  <Card title="Quick tutorial" icon="play" href="/quickstart">
+    Build your first Hive app in minutes
+  </Card>
+</CardGroup>

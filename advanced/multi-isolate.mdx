@@ -1,0 +1,318 @@
+---
+title: Multi-isolate support
+description: Learn how to use Hive across multiple isolates with Hive.compute() and concurrent access patterns
+---
+
+Hive 4.x provides built-in support for accessing boxes from multiple isolates simultaneously. This allows you to perform database operations in background isolates without blocking your UI thread.
+
+## Understanding isolates in Hive
+
+Unlike previous versions of Hive, version 4.x uses Isar internally, which provides native support for concurrent access across isolates. You can safely access the same box from multiple isolates without risking data corruption or conflicts.
+
+<Note>
+In Hive 4.x, multiple isolates can access the same box simultaneously. The underlying Isar engine handles synchronization and ensures data consistency.
+</Note>
+
+## Using Hive.compute()
+
+The `Hive.compute()` method provides a convenient way to run operations in a separate isolate. It automatically handles initialization and cleanup:
+
+```dart
+// Opening the box in the main isolate
+final box = Hive.box();
+
+// Storing some data
+box.put('nectarType', 'wildflower');
+
+await Hive.compute(() {
+  // Accessing the same box from another isolate
+  final box = Hive.box();
+  print(box.get('nectarType')); // wildflower
+
+  // Updating the data
+  box.put('nectarType', 'lavender');
+});
+
+// Reading the updated value
+print(box.get('nectarType')); // lavender
+```
+
+The `Hive.compute()` method is defined in `lib/src/hive.dart:98` and accepts these parameters:
+
+- `computation` - The function to execute in the isolate
+- `debugName` - Optional name for identifying the isolate in debuggers (defaults to "Hive Isolate")
+
+<Tip>
+Use `Hive.compute()` for heavy database operations that might block the UI thread, such as bulk inserts, complex queries, or large data transformations.
+</Tip>
+
+## How Hive.compute() works internally
+
+When you call `Hive.compute()`, Hive performs the following steps:
+
+1. **Captures state**: Saves the current `_typeRegistry` and `defaultDirectory`
+2. **Spawns isolate**: Creates a new isolate using `Isolate.run()`
+3. **Initializes Hive**: Restores the type registry and default directory in the new isolate
+4. **Executes computation**: Runs your provided function
+5. **Cleanup**: Automatically closes all boxes opened in the isolate using `Hive.closeAllBoxes()`
+
+```dart
+static Future<T> compute<T>(
+  FutureOr<T> Function() computation, {
+  String? debugName,
+}) {
+  final registry = _typeRegistry;
+  final dir = defaultDirectory;
+  return Isolate.run(
+    () async {
+      Hive._typeRegistry = registry;
+      Hive.defaultDirectory = dir;
+      try {
+        return await computation();
+      } finally {
+        Hive.closeAllBoxes();
+      }
+    },
+    debugName: debugName ?? 'Hive Isolate',
+  );
+}
+```
+
+## Manual isolate management
+
+For more control, you can manually manage isolates using `Isolate.run()` or `Isolate.spawn()`. When doing so, you must ensure proper initialization:
+
+```dart
+import 'dart:isolate';
+
+void backgroundTask() {
+  // You must set the default directory in each isolate
+  Hive.defaultDirectory = '/path/to/directory';
+  
+  // Register any custom type adapters
+  Hive.registerAdapter('MyType', MyType.fromJson);
+  
+  // Now you can access boxes
+  final box = Hive.box();
+  box.put('processed', true);
+  
+  // Clean up when done
+  Hive.closeAllBoxes();
+}
+
+void main() async {
+  // Initialize Hive in main isolate
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+  Hive.registerAdapter('MyType', MyType.fromJson);
+  
+  // Spawn background isolate
+  await Isolate.run(backgroundTask);
+}
+```
+
+<Warning>
+When manually managing isolates, you must set `Hive.defaultDirectory` and register all type adapters in each isolate before opening boxes.
+</Warning>
+
+## Accessing boxes across isolates
+
+When you open a box with the same name in multiple isolates, Hive ensures they point to the same underlying database file:
+
+```dart
+// Main isolate
+final box = Hive.box(name: 'myBox');
+box.put('counter', 0);
+
+// Background isolate 1
+await Hive.compute(() {
+  final box = Hive.box(name: 'myBox');
+  final count = box.get('counter') ?? 0;
+  box.put('counter', count + 1);
+});
+
+// Background isolate 2
+await Hive.compute(() {
+  final box = Hive.box(name: 'myBox');
+  final count = box.get('counter') ?? 0;
+  box.put('counter', count + 1);
+});
+
+// Main isolate - will see updates from both background isolates
+print(box.get('counter')); // 2
+```
+
+## Watching for changes across isolates
+
+You can use the `watch()` and `watchKey()` methods to be notified of changes made in other isolates:
+
+```dart
+// Main isolate - set up a listener
+final box = Hive.box();
+box.watch().listen((_) {
+  print('Box was modified!');
+});
+
+box.watchKey('status').listen((value) {
+  print('Status changed to: $value');
+});
+
+// Background isolate - make changes
+await Hive.compute(() {
+  final box = Hive.box();
+  box.put('status', 'processing');
+  // The listeners in the main isolate will be triggered
+});
+```
+
+<Note>
+The `watch()` method returns a broadcast stream of all changes to the box, making it ideal for monitoring background isolate activity. See `lib/src/box.dart:133` for the interface definition.
+</Note>
+
+## Performance considerations
+
+### Isolate overhead
+
+Creating isolates has a cost. Each isolate:
+- Requires its own memory space
+- Takes time to initialize
+- Needs to set up the Hive environment
+
+For small, quick operations, the overhead of spawning an isolate may outweigh the benefits.
+
+```dart
+// ❌ Not recommended - overhead exceeds benefit
+await Hive.compute(() {
+  final box = Hive.box();
+  box.put('key', 'value'); // Simple operation
+});
+
+// ✅ Better - keep simple operations on main isolate
+final box = Hive.box();
+box.put('key', 'value');
+
+// ✅ Good use case - heavy operation worth the isolate overhead
+await Hive.compute(() {
+  final box = Hive.box();
+  for (var i = 0; i < 10000; i++) {
+    box.put('item_$i', generateLargeObject());
+  }
+});
+```
+
+### Box lifecycle
+
+Boxes opened in `Hive.compute()` are automatically closed when the computation completes. For long-running isolates, manage box lifecycles carefully:
+
+```dart
+// Short-lived isolate - automatic cleanup
+await Hive.compute(() {
+  final box = Hive.box();
+  box.put('data', value);
+  // Box automatically closed
+});
+
+// Long-running isolate - manual management
+void longRunningTask(SendPort sendPort) {
+  Hive.defaultDirectory = '/path/to/directory';
+  
+  final box = Hive.box();
+  
+  // Do work...
+  
+  // Clean up when truly done
+  box.close();
+}
+```
+
+## Common patterns
+
+### Background data processing
+
+```dart
+Future<void> processLargeDataset(List<Map<String, dynamic>> data) async {
+  await Hive.compute(() {
+    final box = Hive.box(name: 'processedData');
+    
+    for (final item in data) {
+      // Heavy processing
+      final processed = complexTransformation(item);
+      box.put(item['id'], processed);
+    }
+  });
+}
+```
+
+### Batch operations
+
+```dart
+Future<void> batchImport(List<Record> records) async {
+  await Hive.compute(() {
+    final box = Hive.box<Record>(name: 'records');
+    
+    // Use transactions for better performance
+    box.write(() {
+      final entries = {for (var r in records) r.id: r};
+      box.putAll(entries);
+    });
+  });
+}
+```
+
+### Returning results
+
+```dart
+Future<int> countRecords() async {
+  return await Hive.compute(() {
+    final box = Hive.box();
+    return box.length;
+  });
+}
+
+Future<List<String>> searchKeys(String prefix) async {
+  return await Hive.compute(() {
+    final box = Hive.box();
+    return box.keys
+        .where((key) => key.startsWith(prefix))
+        .toList();
+  });
+}
+```
+
+## Debugging isolates
+
+Use the `debugName` parameter to identify isolates in your debugger:
+
+```dart
+await Hive.compute(
+  () {
+    final box = Hive.box();
+    // Heavy computation
+  },
+  debugName: 'Data Processing Isolate',
+);
+
+await Hive.compute(
+  () {
+    final box = Hive.box();
+    // Another computation
+  },
+  debugName: 'Export Isolate',
+);
+```
+
+## Limitations and best practices
+
+<Warning>
+Boxes are marked with `@pragma('vm:isolate-unsendable')` (see `lib/src/box.dart:4`), which means you cannot pass box instances between isolates via `SendPort`. Always open boxes directly in each isolate.
+</Warning>
+
+### Best practices
+
+1. **Use Hive.compute() for isolation**: Prefer `Hive.compute()` over manual isolate management for automatic cleanup
+2. **Register adapters consistently**: Ensure all type adapters are registered in every isolate
+3. **Set defaultDirectory early**: Configure `Hive.defaultDirectory` before opening any boxes
+4. **Close boxes in long-running isolates**: Call `Hive.closeAllBoxes()` when your isolate's work is done
+5. **Use transactions for atomicity**: Combine with transactions for atomic multi-operation updates
+6. **Watch for cross-isolate changes**: Use `watch()` and `watchKey()` to react to changes from other isolates
+7. **Consider the overhead**: Only use isolates for operations heavy enough to justify the cost

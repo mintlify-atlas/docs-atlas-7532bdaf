@@ -1,0 +1,406 @@
+---
+title: Type safety
+description: Using generic type parameters to ensure type-safe storage in Hive boxes
+---
+
+Hive boxes support generic type parameters, allowing you to enforce type safety at compile time. This prevents accidentally storing or retrieving values of the wrong type.
+
+## Creating typed boxes
+
+Specify the type parameter when opening a box:
+
+```dart
+final stringBox = Hive.box<String>(name: 'strings');
+final intBox = Hive.box<int>(name: 'numbers');
+final userBox = Hive.box<User>(name: 'users');
+```
+
+Now the box only accepts values of the specified type.
+
+## Type-safe writes
+
+Typed boxes enforce the correct type at compile time:
+
+```dart
+final box = Hive.box<String>(name: 'messages');
+
+box.put('greeting', 'Hello');      // ✓ OK
+box.put('farewell', 'Goodbye');    // ✓ OK
+box.put('count', 42);              // ✗ Compile error
+box.put('active', true);           // ✗ Compile error
+```
+
+This prevents type errors before your code even runs.
+
+## Type-safe reads
+
+Reading from typed boxes returns the correct type:
+
+```dart
+final box = Hive.box<String>(name: 'strings');
+
+// Returns String?, not dynamic
+final greeting = box.get('greeting');
+if (greeting != null) {
+  print(greeting.toUpperCase()); // Safe to call String methods
+}
+
+// Returns String (non-nullable)
+final message = box.getAt(0);
+print(message.length); // No null check needed
+```
+
+## Type-safe collections
+
+Methods that return collections are also type-safe:
+
+```dart
+final box = Hive.box<String>(name: 'strings');
+
+// Returns List<String?>
+final values = box.getAll(['key1', 'key2', 'key3']);
+for (final value in values) {
+  if (value != null) {
+    print(value.toLowerCase());
+  }
+}
+
+// Returns List<String>
+final range = box.getRange(0, 5);
+for (final value in range) {
+  print(value.length); // All values are non-null
+}
+```
+
+## Consistency across access
+
+Always use the same type when accessing a box:
+
+```dart
+// First access
+final box1 = Hive.box<String>(name: 'data');
+box1.put('key', 'value');
+
+// Subsequent access must use same type
+final box2 = Hive.box<String>(name: 'data'); // ✓ OK
+
+// Wrong type throws error
+try {
+  final box3 = Hive.box<int>(name: 'data'); // ✗ Error!
+} catch (e) {
+  print('Type mismatch: $e');
+}
+```
+
+<Warning>
+  Once a box is opened with a specific type, you must use the same type for all subsequent accesses. Attempting to open the same box with a different type will throw an `ArgumentError`.
+</Warning>
+
+## Custom object types
+
+Use typed boxes with your custom classes:
+
+<Steps>
+  <Step title="Define your class">
+    ```dart
+    class User {
+      final String name;
+      final int age;
+
+      User({required this.name, required this.age});
+
+      factory User.fromJson(Map<String, dynamic> json) => User(
+        name: json['name'] as String,
+        age: json['age'] as int,
+      );
+
+      Map<String, dynamic> toJson() => {'name': name, 'age': age};
+    }
+    ```
+  </Step>
+
+  <Step title="Register the adapter">
+    ```dart
+    Hive.registerAdapter('User', User.fromJson);
+    ```
+  </Step>
+
+  <Step title="Use a typed box">
+    ```dart
+    final userBox = Hive.box<User>(name: 'users');
+
+    // Only User objects allowed
+    userBox.put('alice', User(name: 'Alice', age: 25));
+    userBox.put('bob', User(name: 'Bob', age: 30));
+
+    // Compile error - wrong type
+    // userBox.put('invalid', 'not a user');
+
+    // Returns User?, not dynamic
+    final alice = userBox.get('alice');
+    if (alice != null) {
+      print('${alice.name} is ${alice.age} years old');
+    }
+    ```
+  </Step>
+</Steps>
+
+## Primitive types
+
+Typed boxes work with all Dart primitive types:
+
+<CodeGroup>
+```dart Strings
+final box = Hive.box<String>(name: 'strings');
+box.put('name', 'Alice');
+box.put('city', 'New York');
+
+final name = box.get('name'); // String?
+```
+
+```dart Numbers
+final intBox = Hive.box<int>(name: 'integers');
+intBox.put('score', 100);
+intBox.put('level', 5);
+
+final doubleBox = Hive.box<double>(name: 'doubles');
+doubleBox.put('pi', 3.14159);
+doubleBox.put('ratio', 0.75);
+```
+
+```dart Booleans
+final box = Hive.box<bool>(name: 'flags');
+box.put('isActive', true);
+box.put('hasAccess', false);
+
+final isActive = box.get('isActive'); // bool?
+```
+</CodeGroup>
+
+## Collection types
+
+Store typed collections:
+
+<Tabs>
+  <Tab title="Lists">
+    ```dart
+    final box = Hive.box<List<String>>(name: 'stringLists');
+
+    box.put('fruits', ['Apple', 'Banana', 'Cherry']);
+    box.put('colors', ['Red', 'Green', 'Blue']);
+
+    final fruits = box.get('fruits'); // List<String>?
+    if (fruits != null) {
+      for (final fruit in fruits) {
+        print(fruit.toLowerCase());
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Maps">
+    ```dart
+    final box = Hive.box<Map<String, dynamic>>(name: 'configs');
+
+    box.put('theme', {
+      'primary': '#007AFF',
+      'secondary': '#5856D6',
+      'mode': 'dark',
+    });
+
+    final theme = box.get('theme'); // Map<String, dynamic>?
+    ```
+  </Tab>
+
+  <Tab title="Lists of objects">
+    ```dart
+    final box = Hive.box<List<User>>(name: 'userLists');
+
+    box.put('admins', [
+      User(name: 'Alice', age: 30),
+      User(name: 'Bob', age: 35),
+    ]);
+
+    final admins = box.get('admins'); // List<User>?
+    ```
+  </Tab>
+</Tabs>
+
+## Dynamic boxes
+
+When you don't specify a type, boxes default to `dynamic`:
+
+```dart
+// Same as Hive.box<dynamic>()
+final box = Hive.box(name: 'mixed');
+
+// Can store any type
+box.put('string', 'Hello');
+box.put('number', 42);
+box.put('bool', true);
+box.put('list', [1, 2, 3]);
+
+// Returns dynamic - requires casting
+final value = box.get('string');
+if (value is String) {
+  print(value.toUpperCase());
+}
+```
+
+Dynamic boxes are flexible but lose compile-time type safety.
+
+## Type guards
+
+Implement type checking for dynamic boxes:
+
+```dart
+final box = Hive.box(name: 'mixed');
+
+T? getTyped<T>(String key) {
+  final value = box.get(key);
+  if (value is T) {
+    return value;
+  }
+  return null;
+}
+
+final name = getTyped<String>('username');
+final count = getTyped<int>('loginCount');
+```
+
+## Best practices
+
+<Steps>
+  <Step title="Prefer typed boxes">
+    Use typed boxes whenever possible for better safety:
+
+    ```dart
+    // Good
+    final userBox = Hive.box<User>(name: 'users');
+    final settingsBox = Hive.box<Map<String, dynamic>>(name: 'settings');
+
+    // Avoid when unnecessary
+    final mixedBox = Hive.box(name: 'mixed');
+    ```
+  </Step>
+
+  <Step title="Consistent type usage">
+    Always use the same type when accessing a box:
+
+    ```dart
+    // Good - consistent type
+    void saveUser(User user) {
+      final box = Hive.box<User>(name: 'users');
+      box.put(user.id, user);
+    }
+
+    User? loadUser(String id) {
+      final box = Hive.box<User>(name: 'users');
+      return box.get(id);
+    }
+    ```
+  </Step>
+
+  <Step title="Document box types">
+    Make box types clear in your code:
+
+    ```dart
+    class UserRepository {
+      late final Box<User> _userBox;
+      late final Box<String> _tokenBox;
+
+      Future<void> init() async {
+        _userBox = Hive.box<User>(name: 'users');
+        _tokenBox = Hive.box<String>(name: 'tokens');
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Handle type errors">
+    Catch and handle type-related errors:
+
+    ```dart
+    try {
+      final box = Hive.box<String>(name: 'data');
+    } catch (e) {
+      if (e is ArgumentError && e.message.contains('different type')) {
+        // Box was opened with different type
+        print('Type mismatch - box already open with different type');
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Type safety with indices
+
+Index-based operations are also type-safe:
+
+```dart
+final box = Hive.box<String>(name: 'strings');
+
+box.add('First');
+box.add('Second');
+box.add('Third');
+
+// Returns String (non-nullable)
+final first = box.getAt(0);
+print(first.length);
+
+// Returns List<String>
+final range = box.getRange(0, 2);
+for (final item in range) {
+  print(item.toUpperCase());
+}
+
+// Type-safe updates
+box.putAt(0, 'Updated'); // ✓ OK
+// box.putAt(0, 123);    // ✗ Compile error
+```
+
+## Migration between types
+
+If you need to change a box's type, you must delete and recreate it:
+
+```dart
+// Old box with String type
+final oldBox = Hive.box<String>(name: 'data');
+final data = oldBox.get('key');
+
+// Delete the box
+oldBox.deleteFromDisk();
+
+// Create new box with different type
+final newBox = Hive.box<int>(name: 'data');
+// Migrate and convert data as needed
+```
+
+## Common pitfalls
+
+Avoid these common mistakes:
+
+<CodeGroup>
+```dart Wrong: Type mismatch
+// Opening with different types
+final box1 = Hive.box<String>(name: 'data');
+final box2 = Hive.box<int>(name: 'data'); // Error!
+```
+
+```dart Wrong: Missing null check
+final box = Hive.box<String>(name: 'strings');
+final value = box.get('key'); // String? (nullable)
+print(value.length); // Error - might be null
+```
+
+```dart Right: Proper null handling
+final box = Hive.box<String>(name: 'strings');
+final value = box.get('key');
+if (value != null) {
+  print(value.length); // Safe
+}
+
+// Or use null-aware operators
+final length = box.get('key')?.length ?? 0;
+```
+</CodeGroup>

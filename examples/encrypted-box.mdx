@@ -1,0 +1,390 @@
+---
+title: Encrypted box example
+description: Secure your sensitive data with AES-256 encryption in Hive
+---
+
+Hive provides built-in encryption using AES-256 in CBC mode to protect sensitive data. This example shows you how to create and use encrypted boxes.
+
+## How encryption works
+
+When you provide an encryption key to Hive:
+
+- Hive uses 256-bit AES encryption in CBC mode
+- Each database page is encrypted separately
+- The encryption key must be a string
+- Data is encrypted before writing to disk and decrypted when reading
+
+<Note>
+  Encryption uses the SQLite engine instead of the default Isar engine. This happens automatically when you provide an encryption key.
+</Note>
+
+## Generate an encryption key
+
+You need a secure encryption key. Here's how to generate one:
+
+```dart
+import 'dart:math';
+
+String generateSecureKey() {
+  final random = Random.secure();
+  final values = List<int>.generate(32, (i) => random.nextInt(256));
+  return base64Url.encode(values);
+}
+```
+
+<Tip>
+  Store your encryption key securely using the `flutter_secure_storage` package. Never hardcode encryption keys in your source code.
+</Tip>
+
+## Create an encrypted box
+
+Pass the encryption key when opening a box:
+
+```dart
+import 'package:hive/hive.dart';
+
+void main() async {
+  Hive.defaultDirectory = './secure_data';
+  
+  // Your encryption key (store this securely!)
+  final encryptionKey = 'your-secure-encryption-key-here';
+  
+  // Open an encrypted box
+  final secureBox = Hive.box(
+    name: 'secrets',
+    encryptionKey: encryptionKey,
+  );
+  
+  // Use the box normally
+  secureBox.put('apiKey', 'sk_live_abc123xyz789');
+  secureBox.put('userId', '12345');
+  
+  print('Data stored securely!');
+}
+```
+
+## Complete Flutter example
+
+Here's a complete example using `flutter_secure_storage` to manage the encryption key:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:math';
+import 'dart:convert';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final directory = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = directory.path;
+  
+  runApp(SecureApp());
+}
+
+class SecureApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Secure Storage Demo',
+      home: SecureStorageDemo(),
+    );
+  }
+}
+
+class SecureStorageDemo extends StatefulWidget {
+  @override
+  _SecureStorageDemoState createState() => _SecureStorageDemoState();
+}
+
+class _SecureStorageDemoState extends State<SecureStorageDemo> {
+  final _storage = FlutterSecureStorage();
+  late Box<String> _secureBox;
+  bool _initialized = false;
+  
+  @override
+  void initState() {
+    super.initState();
+    _initializeSecureBox();
+  }
+  
+  Future<void> _initializeSecureBox() async {
+    // Get or create encryption key
+    String? encryptionKey = await _storage.read(key: 'hive_encryption_key');
+    
+    if (encryptionKey == null) {
+      // Generate new encryption key
+      encryptionKey = _generateSecureKey();
+      await _storage.write(key: 'hive_encryption_key', value: encryptionKey);
+    }
+    
+    // Open encrypted box
+    _secureBox = Hive.box<String>(
+      name: 'secure_data',
+      encryptionKey: encryptionKey,
+    );
+    
+    setState(() {
+      _initialized = true;
+    });
+  }
+  
+  String _generateSecureKey() {
+    final random = Random.secure();
+    final values = List<int>.generate(32, (i) => random.nextInt(256));
+    return base64Url.encode(values);
+  }
+  
+  void _storeSecretData() {
+    _secureBox.put('apiKey', 'sk_live_abc123xyz789');
+    _secureBox.put('userToken', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...');
+    _secureBox.put('password', 'super_secret_password');
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Secure data stored with encryption')),
+    );
+    setState(() {});
+  }
+  
+  void _clearSecretData() {
+    _secureBox.clear();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('All secure data cleared')),
+    );
+    setState(() {});
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    if (!_initialized) {
+      return Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    
+    return Scaffold(
+      appBar: AppBar(title: Text('Encrypted Hive Box')),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Encrypted Data Storage',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Stored Items: ${_secureBox.length}',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    if (_secureBox.length > 0) ..._buildSecureDataList(),
+                    if (_secureBox.length == 0)
+                      Text(
+                        'No secure data stored',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _storeSecretData,
+              child: Text('Store Secret Data'),
+            ),
+            SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: _secureBox.length > 0 ? _clearSecretData : null,
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: Text('Clear All Data'),
+            ),
+            SizedBox(height: 24),
+            Card(
+              color: Colors.blue.shade50,
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.lock, color: Colors.blue),
+                        SizedBox(width: 8),
+                        Text(
+                          'Encryption Info',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    Text('• 256-bit AES encryption in CBC mode'),
+                    Text('• Encryption key stored in secure storage'),
+                    Text('• Each database page encrypted separately'),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  List<Widget> _buildSecureDataList() {
+    return _secureBox.keys.map((key) {
+      final value = _secureBox.get(key)!;
+      // Mask the value for display
+      final maskedValue = value.length > 10 
+          ? '${value.substring(0, 10)}...' 
+          : value;
+      
+      return Padding(
+        padding: EdgeInsets.symmetric(vertical: 4.0),
+        child: Row(
+          children: [
+            Icon(Icons.key, size: 16, color: Colors.green),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$key: $maskedValue',
+                style: TextStyle(fontFamily: 'monospace'),
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
+  }
+  
+  @override
+  void dispose() {
+    _secureBox.close();
+    super.dispose();
+  }
+}
+```
+
+## Add secure storage dependency
+
+Add `flutter_secure_storage` to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  hive: ^4.0.0
+  isar_flutter_libs: ^4.0.0-dev.13
+  path_provider: ^2.0.0
+  flutter_secure_storage: ^9.0.0
+```
+
+## Important security considerations
+
+<Steps>
+  <Step title="Never hardcode encryption keys">
+    Always generate and store encryption keys securely. Use `flutter_secure_storage` or similar secure storage solutions.
+  </Step>
+  
+  <Step title="Use strong key generation">
+    Generate encryption keys using `Random.secure()` with at least 32 bytes of entropy.
+  </Step>
+  
+  <Step title="Consistent key usage">
+    Once a box is encrypted with a key, you must use the same key to access it. Using a different key will result in an error.
+  </Step>
+  
+  <Step title="Key rotation">
+    If you need to change encryption keys, read all data with the old key, delete the box, and write data with a new key.
+  </Step>
+</Steps>
+
+## Error handling
+
+Handle encryption-related errors properly:
+
+```dart
+try {
+  final box = Hive.box(
+    name: 'secrets',
+    encryptionKey: encryptionKey,
+  );
+} catch (e) {
+  if (e.toString().contains('encryption key')) {
+    print('Wrong encryption key provided!');
+    // Handle wrong key scenario
+  } else {
+    print('Error opening box: $e');
+  }
+}
+```
+
+## Performance considerations
+
+Encryption has minimal performance impact:
+
+- Reading and writing encrypted data is slightly slower than unencrypted
+- The difference is negligible for most applications
+- Hive uses SQLite engine for encrypted boxes instead of Isar
+
+<Note>
+  When you provide an encryption key, Hive automatically switches to the SQLite engine, which supports encryption. This happens transparently without any code changes.
+</Note>
+
+## Checking if a box is encrypted
+
+You can't directly check if a box is encrypted, but you'll get an error if you try to open an encrypted box without the correct key:
+
+```dart
+// If the box was created with encryption
+final encryptedBox = Hive.box(
+  name: 'secrets',
+  encryptionKey: 'original-key',
+);
+
+// This will throw an error
+try {
+  final wrongBox = Hive.box(
+    name: 'secrets',
+    encryptionKey: 'wrong-key',
+  );
+} catch (e) {
+  print('Cannot open box with wrong key');
+}
+```
+
+## When to use encryption
+
+Use encrypted boxes for:
+
+- API keys and tokens
+- User credentials
+- Personal information
+- Financial data
+- Any sensitive user data
+
+Don't encrypt:
+
+- Public data
+- App settings that aren't sensitive
+- Cached data that can be regenerated
+
+<Tip>
+  Only encrypt boxes that contain sensitive data. Unencrypted boxes have slightly better performance and can use the faster Isar engine.
+</Tip>
+
+## Next steps
+
+- Implement key rotation for enhanced security
+- Combine encryption with [custom type adapters](/examples/custom-types)
+- Add biometric authentication before accessing encrypted data
+- Create backup and restore functionality for encrypted data

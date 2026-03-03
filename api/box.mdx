@@ -1,0 +1,654 @@
+---
+title: "Box"
+description: "A collection of key-value pairs with powerful query and transaction capabilities"
+---
+
+## Overview
+
+A `Box` is the main storage container in Hive. It manages a collection of key-value pairs and provides methods for reading, writing, and observing data changes.
+
+## Properties
+
+### isOpen
+
+```dart
+bool get isOpen
+```
+
+Whether this box is currently open. Most operations on a box require it to be open.
+
+### name
+
+```dart
+String get name
+```
+
+The name of the box.
+
+### directory
+
+```dart
+String? get directory
+```
+
+The location of the box in the file system. In the browser, this is `null`.
+
+### length
+
+```dart
+int get length
+```
+
+The number of entries in the box.
+
+### isEmpty
+
+```dart
+bool get isEmpty
+```
+
+Whether the box is empty.
+
+### isNotEmpty
+
+```dart
+bool get isNotEmpty
+```
+
+Whether the box is not empty.
+
+### keys
+
+```dart
+List<String> get keys
+```
+
+All the keys in the box. The keys are sorted by their insertion order.
+
+<CodeGroup>
+```dart Get all keys
+final box = Hive.box<String>();
+final keys = box.keys;
+print('Box has ${keys.length} keys: $keys');
+```
+</CodeGroup>
+
+## Read methods
+
+### get()
+
+Returns the value associated with the given key. If the key does not exist, `null` is returned.
+
+```dart
+E? get(String key, {E? defaultValue})
+```
+
+<ParamField path="key" type="String" required>
+  The key to look up in the box.
+</ParamField>
+
+<ParamField path="defaultValue" type="E?">
+  The value to return if the key does not exist. If not specified, `null` is returned.
+</ParamField>
+
+<CodeGroup>
+```dart Basic get
+final box = Hive.box<String>();
+final value = box.get('username');
+```
+
+```dart With default value
+final box = Hive.box<int>();
+final count = box.get('count', defaultValue: 0);
+```
+</CodeGroup>
+
+### getAt()
+
+Returns the value associated with the n-th key.
+
+```dart
+E getAt(int index)
+```
+
+<ParamField path="index" type="int" required>
+  The index of the entry to retrieve. Must be between 0 and `length - 1`.
+</ParamField>
+
+<CodeGroup>
+```dart Get by index
+final box = Hive.box<String>();
+final firstValue = box.getAt(0);
+```
+</CodeGroup>
+
+### operator []
+
+Returns the value associated with the given key. The key can either be a `String` or an `int` to get an entry by its index.
+
+```dart
+E? operator [](Object key)
+```
+
+<ParamField path="key" type="Object" required>
+  Either a `String` key or an `int` index.
+</ParamField>
+
+<CodeGroup>
+```dart Array-style access
+final box = Hive.box<String>();
+final value = box['username'];
+final firstValue = box[0];
+```
+</CodeGroup>
+
+### getAll()
+
+Returns all values associated with the given keys or `null` if a key does not exist.
+
+```dart
+List<E?> getAll(Iterable<String> keys)
+```
+
+<ParamField path="keys" type="Iterable<String>" required>
+  The keys to look up in the box.
+</ParamField>
+
+<CodeGroup>
+```dart Get multiple values
+final box = Hive.box<String>();
+final values = box.getAll(['user1', 'user2', 'user3']);
+```
+</CodeGroup>
+
+### getRange()
+
+Returns all values in the given range.
+
+```dart
+List<E> getRange(int start, int end)
+```
+
+<ParamField path="start" type="int" required>
+  The start index (inclusive). Must be between 0 and `length - 1`.
+</ParamField>
+
+<ParamField path="end" type="int" required>
+  The end index (exclusive). Must be between 0 and `length`.
+</ParamField>
+
+<CodeGroup>
+```dart Get range of values
+final box = Hive.box<String>();
+final values = box.getRange(0, 10); // Get first 10 values
+```
+</CodeGroup>
+
+### getBetween()
+
+Returns all values between `startKey` and `endKey` (inclusive).
+
+```dart
+List<E> getBetween({String? startKey, String? endKey})
+```
+
+<ParamField path="startKey" type="String?">
+  The start key (inclusive). If `null`, starts from the beginning.
+</ParamField>
+
+<ParamField path="endKey" type="String?">
+  The end key (inclusive). If `null`, goes to the end.
+</ParamField>
+
+<CodeGroup>
+```dart Get values between keys
+final box = Hive.box<User>();
+final users = box.getBetween(
+  startKey: 'user_100',
+  endKey: 'user_200',
+);
+```
+</CodeGroup>
+
+### containsKey()
+
+Checks whether the box contains the given key.
+
+```dart
+bool containsKey(String key)
+```
+
+<ParamField path="key" type="String" required>
+  The key to check for.
+</ParamField>
+
+<CodeGroup>
+```dart Check if key exists
+final box = Hive.box<String>();
+if (box.containsKey('username')) {
+  print('Username exists');
+}
+```
+</CodeGroup>
+
+### keyAt()
+
+Get the n-th key in the box.
+
+```dart
+String? keyAt(int index)
+```
+
+<ParamField path="index" type="int" required>
+  The index of the key to retrieve. Returns `null` if the index is out of bounds.
+</ParamField>
+
+<CodeGroup>
+```dart Get key at index
+final box = Hive.box<String>();
+final firstKey = box.keyAt(0);
+```
+</CodeGroup>
+
+## Write methods
+
+### put()
+
+Saves the key-value pair to the box.
+
+```dart
+void put(String key, E value)
+```
+
+<ParamField path="key" type="String" required>
+  The key to associate with the value.
+</ParamField>
+
+<ParamField path="value" type="E" required>
+  The value to store.
+</ParamField>
+
+<CodeGroup>
+```dart Put value
+final box = Hive.box<String>();
+box.put('username', 'john_doe');
+```
+</CodeGroup>
+
+### putAt()
+
+Associates the value with the n-th key. An exception is raised if the key does not exist.
+
+```dart
+void putAt(int index, E value)
+```
+
+<ParamField path="index" type="int" required>
+  The index of the entry to update. Must be between 0 and `length - 1`.
+</ParamField>
+
+<ParamField path="value" type="E" required>
+  The value to store.
+</ParamField>
+
+<CodeGroup>
+```dart Put at index
+final box = Hive.box<String>();
+box.putAt(0, 'new_value');
+```
+</CodeGroup>
+
+### operator []=
+
+Saves the key-value pair. The key can either be a `String` or an `int` to save an entry by its index.
+
+```dart
+void operator []=(Object key, E value)
+```
+
+<ParamField path="key" type="Object" required>
+  Either a `String` key or an `int` index.
+</ParamField>
+
+<ParamField path="value" type="E" required>
+  The value to store.
+</ParamField>
+
+<CodeGroup>
+```dart Array-style assignment
+final box = Hive.box<String>();
+box['username'] = 'john_doe';
+box[0] = 'first_value';
+```
+</CodeGroup>
+
+### putAll()
+
+Saves all the key-value pairs in the entries map.
+
+```dart
+void putAll(Map<String, E> entries)
+```
+
+<ParamField path="entries" type="Map<String, E>" required>
+  A map of key-value pairs to save to the box.
+</ParamField>
+
+<CodeGroup>
+```dart Put multiple entries
+final box = Hive.box<String>();
+box.putAll({
+  'user1': 'Alice',
+  'user2': 'Bob',
+  'user3': 'Charlie',
+});
+```
+</CodeGroup>
+
+### putRange()
+
+Overwrites the values in the given range with the given values.
+
+```dart
+void putRange(int start, int end, Iterable<E> values)
+```
+
+<ParamField path="start" type="int" required>
+  The start index (inclusive). Must be between 0 and `length - 1`.
+</ParamField>
+
+<ParamField path="end" type="int" required>
+  The end index (exclusive). Must be between 0 and `length`.
+</ParamField>
+
+<ParamField path="values" type="Iterable<E>" required>
+  The values to write. The number of values must match the range size.
+</ParamField>
+
+<CodeGroup>
+```dart Put range of values
+final box = Hive.box<String>();
+box.putRange(0, 3, ['a', 'b', 'c']);
+```
+</CodeGroup>
+
+### add()
+
+Saves the value with an auto-increment key.
+
+```dart
+void add(E value)
+```
+
+<ParamField path="value" type="E" required>
+  The value to store.
+</ParamField>
+
+<CodeGroup>
+```dart Add value
+final box = Hive.box<String>();
+box.add('value1');
+box.add('value2');
+```
+</CodeGroup>
+
+### addAll()
+
+Saves all the values with auto-increment keys.
+
+```dart
+void addAll(Iterable<E> values)
+```
+
+<ParamField path="values" type="Iterable<E>" required>
+  The values to store.
+</ParamField>
+
+<CodeGroup>
+```dart Add multiple values
+final box = Hive.box<String>();
+box.addAll(['value1', 'value2', 'value3']);
+```
+</CodeGroup>
+
+## Delete methods
+
+### delete()
+
+Deletes the given key from the box. If it does not exist, nothing happens.
+
+```dart
+bool delete(String key)
+```
+
+<ParamField path="key" type="String" required>
+  The key to delete from the box.
+</ParamField>
+
+Returns `true` if the key was deleted, `false` if it did not exist.
+
+<CodeGroup>
+```dart Delete value
+final box = Hive.box<String>();
+final deleted = box.delete('username');
+if (deleted) {
+  print('Username was deleted');
+}
+```
+</CodeGroup>
+
+### deleteAt()
+
+Deletes the n-th key from the box. If it does not exist, nothing happens.
+
+```dart
+void deleteAt(int index)
+```
+
+<ParamField path="index" type="int" required>
+  The index of the entry to delete.
+</ParamField>
+
+<CodeGroup>
+```dart Delete at index
+final box = Hive.box<String>();
+box.deleteAt(0); // Delete first entry
+```
+</CodeGroup>
+
+### deleteAll()
+
+Deletes all the given keys from the box. If a key does not exist, it is skipped.
+
+```dart
+int deleteAll(Iterable<String> keys)
+```
+
+<ParamField path="keys" type="Iterable<String>" required>
+  The keys to delete from the box.
+</ParamField>
+
+Returns the number of keys that were deleted.
+
+<CodeGroup>
+```dart Delete multiple keys
+final box = Hive.box<String>();
+final count = box.deleteAll(['user1', 'user2', 'user3']);
+print('Deleted $count entries');
+```
+</CodeGroup>
+
+### deleteRange()
+
+Deletes all the entries in the given range.
+
+```dart
+void deleteRange(int start, int end)
+```
+
+<ParamField path="start" type="int" required>
+  The start index (inclusive). Must be between 0 and `length - 1`.
+</ParamField>
+
+<ParamField path="end" type="int" required>
+  The end index (exclusive). Must be between 0 and `length`.
+</ParamField>
+
+<CodeGroup>
+```dart Delete range
+final box = Hive.box<String>();
+box.deleteRange(0, 10); // Delete first 10 entries
+```
+</CodeGroup>
+
+### clear()
+
+Removes all entries from the box.
+
+```dart
+void clear({bool notify = true})
+```
+
+<ParamField path="notify" type="bool" default="true">
+  Whether to notify listeners about this change. If `false`, watchers will not be triggered.
+</ParamField>
+
+<CodeGroup>
+```dart Clear box
+final box = Hive.box<String>();
+box.clear();
+```
+
+```dart Clear without notifying
+final box = Hive.box<String>();
+box.clear(notify: false);
+```
+</CodeGroup>
+
+## Transaction methods
+
+### read()
+
+Starts a read transaction on the box. Transactions provide an atomic view of the box. All read operations inside the transaction will see the same state of the box.
+
+```dart
+T read<T>(T Function() callback)
+```
+
+<ParamField path="callback" type="T Function()" required>
+  The function to execute within the transaction. The return value is returned by the `read` method.
+</ParamField>
+
+<CodeGroup>
+```dart Read transaction
+final box = Hive.box<String>();
+final result = box.read(() {
+  final value1 = box.get('key1');
+  final value2 = box.get('key2');
+  return '$value1-$value2';
+});
+```
+</CodeGroup>
+
+### write()
+
+Starts a write transaction on the box. Transactions provide an atomic view of the box. All read operations inside the transaction will see the same state of the box.
+
+```dart
+T write<T>(T Function() callback)
+```
+
+<ParamField path="callback" type="T Function()" required>
+  The function to execute within the transaction. The return value is returned by the `write` method.
+</ParamField>
+
+<CodeGroup>
+```dart Write transaction
+final box = Hive.box<String>();
+box.write(() {
+  box.put('key1', 'value1');
+  box.put('key2', 'value2');
+  box.delete('key3');
+});
+```
+</CodeGroup>
+
+## Watch methods
+
+### watch()
+
+Returns a broadcast stream of all changes to the box. This should mainly be used to be notified of changes in background isolates.
+
+```dart
+Stream<void> watch()
+```
+
+<CodeGroup>
+```dart Watch all changes
+final box = Hive.box<String>();
+box.watch().listen((_) {
+  print('Box changed');
+});
+```
+</CodeGroup>
+
+### watchKey()
+
+Watch for changes to the given key.
+
+```dart
+Stream<E?> watchKey(String key)
+```
+
+<ParamField path="key" type="String" required>
+  The key to watch for changes.
+</ParamField>
+
+<CodeGroup>
+```dart Watch specific key
+final box = Hive.box<String>();
+box.watchKey('username').listen((value) {
+  print('Username changed to: $value');
+});
+```
+</CodeGroup>
+
+## Lifecycle methods
+
+### close()
+
+Closes the box.
+
+```dart
+void close()
+```
+
+<Warning>
+  This closes all instances of this box. Make sure you don't access the box anywhere else after calling this method.
+</Warning>
+
+<CodeGroup>
+```dart Close box
+final box = Hive.box<String>();
+box.close();
+```
+</CodeGroup>
+
+### deleteFromDisk()
+
+Removes the file which contains the box and closes the box. If a box is still open in another isolate, it will not be deleted.
+
+```dart
+void deleteFromDisk()
+```
+
+<Warning>
+  This operation is irreversible. All data in the box will be permanently deleted.
+</Warning>
+
+<CodeGroup>
+```dart Delete box from disk
+final box = Hive.box<String>();
+box.deleteFromDisk();
+```
+</CodeGroup>

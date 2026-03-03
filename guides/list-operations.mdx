@@ -1,0 +1,486 @@
+---
+title: List operations
+description: Using Hive boxes like lists with index-based access and operations
+---
+
+While Hive boxes are primarily key-value stores, they also function like ordered lists. You can access values by index, add items sequentially, and perform list-like operations.
+
+## Understanding box ordering
+
+Boxes maintain insertion order. Every entry has both a key and an index:
+
+```dart
+final box = Hive.box();
+
+box.put('first', 'Rose');   // Index 0
+box.put('second', 'Tulip'); // Index 1
+box.put('third', 'Lily');   // Index 2
+
+print(box.getAt(0)); // Rose
+print(box.getAt(1)); // Tulip
+print(box.getAt(2)); // Lily
+```
+
+The order never changes unless you explicitly delete entries.
+
+## Adding items like a list
+
+Use `add()` to append items with auto-generated keys:
+
+```dart
+final box = Hive.box();
+
+box.add('Apple');
+box.add('Banana');
+box.add('Cherry');
+
+print(box.length); // 3
+print(box.getAt(0)); // Apple
+print(box.getAt(1)); // Banana
+print(box.getAt(2)); // Cherry
+```
+
+This is similar to `list.add()` in regular Dart lists.
+
+## Adding multiple items
+
+Use `addAll()` to add multiple items at once:
+
+```dart
+final box = Hive.box();
+
+box.addAll(['Red', 'Green', 'Blue', 'Yellow']);
+
+print(box.length); // 4
+
+for (var i = 0; i < box.length; i++) {
+  print('$i: ${box.getAt(i)}');
+}
+```
+
+## Reading by index
+
+Access values by their position using `getAt()`:
+
+```dart
+final box = Hive.box();
+box.addAll(['First', 'Second', 'Third', 'Fourth']);
+
+final first = box.getAt(0);
+final last = box.getAt(box.length - 1);
+
+print('First: $first');  // First: First
+print('Last: $last');    // Last: Fourth
+```
+
+<Warning>
+  `getAt()` throws a `RangeError` if the index is out of bounds. Always check `box.length` before accessing.
+</Warning>
+
+### Safe index access
+
+```dart
+T? safeGetAt<T>(Box box, int index) {
+  if (index >= 0 && index < box.length) {
+    return box.getAt(index) as T?;
+  }
+  return null;
+}
+
+final value = safeGetAt<String>(box, 10);
+if (value != null) {
+  print(value);
+} else {
+  print('Index out of range');
+}
+```
+
+## Updating by index
+
+Modify values at specific positions using `putAt()`:
+
+```dart
+final box = Hive.box();
+
+box.addAll(['Original 1', 'Original 2', 'Original 3']);
+print(box.getAt(1)); // Original 2
+
+box.putAt(1, 'Updated 2');
+print(box.getAt(1)); // Updated 2
+```
+
+You can also use the bracket operator:
+
+```dart
+box[0] = 'New First';
+box[2] = 'New Third';
+```
+
+## Getting ranges
+
+Retrieve consecutive entries using `getRange()`:
+
+```dart
+final box = Hive.box();
+box.addAll(['A', 'B', 'C', 'D', 'E', 'F']);
+
+// Get items from index 1 to 4 (exclusive)
+final range = box.getRange(1, 4);
+print(range); // [B, C, D]
+
+// Get first three items
+final firstThree = box.getRange(0, 3);
+print(firstThree); // [A, B, C]
+
+// Get last two items
+final lastTwo = box.getRange(box.length - 2, box.length);
+print(lastTwo); // [E, F]
+```
+
+The `end` parameter is exclusive, just like Dart's `List.sublist()`.
+
+## Updating ranges
+
+Replace multiple consecutive values using `putRange()`:
+
+```dart
+final box = Hive.box();
+box.addAll(['A', 'B', 'C', 'D', 'E']);
+
+print(box.getRange(0, 5)); // [A, B, C, D, E]
+
+box.putRange(1, 4, ['X', 'Y', 'Z']);
+print(box.getRange(0, 5)); // [A, X, Y, Z, E]
+```
+
+<Note>
+  The number of values must match the range size. If `end - start` is 3, you must provide exactly 3 values.
+</Note>
+
+## Deleting by index
+
+Remove items by position using `deleteAt()`:
+
+```dart
+final box = Hive.box();
+box.addAll(['First', 'Second', 'Third', 'Fourth']);
+
+print(box.length); // 4
+
+box.deleteAt(1); // Remove 'Second'
+print(box.length); // 3
+
+print(box.getAt(0)); // First
+print(box.getAt(1)); // Third (shifted down)
+print(box.getAt(2)); // Fourth
+```
+
+After deletion, subsequent items shift down to fill the gap.
+
+## Deleting ranges
+
+Remove multiple consecutive items:
+
+```dart
+final box = Hive.box();
+box.addAll(['A', 'B', 'C', 'D', 'E', 'F']);
+
+print(box.length); // 6
+
+box.deleteRange(1, 4); // Remove B, C, D
+print(box.length); // 3
+
+print(box.getAt(0)); // A
+print(box.getAt(1)); // E
+print(box.getAt(2)); // F
+```
+
+## Getting keys by index
+
+Retrieve the key at a specific position:
+
+```dart
+final box = Hive.box();
+
+box.put('user1', 'Alice');
+box.put('user2', 'Bob');
+box.add('Charlie'); // Auto-generated key
+
+final key0 = box.keyAt(0);
+final key1 = box.keyAt(1);
+final key2 = box.keyAt(2);
+
+print('Key at 0: $key0'); // user1
+print('Key at 1: $key1'); // user2
+print('Key at 2: $key2'); // (auto-generated)
+```
+
+## Mixing keys and indices
+
+You can freely mix key-based and index-based operations:
+
+```dart
+final box = Hive.box();
+
+// Add with explicit key
+box.put('greeting', 'Hello');
+
+// Add with auto-generated key
+box.add('World');
+
+// Access by key
+print(box['greeting']); // Hello
+
+// Access by index
+print(box.getAt(0)); // Hello
+print(box.getAt(1)); // World
+
+// Both refer to the same entry
+print(box['greeting'] == box.getAt(0)); // true
+```
+
+## Iterating like a list
+
+<Tabs>
+  <Tab title="By index">
+    ```dart
+    final box = Hive.box();
+    box.addAll(['Apple', 'Banana', 'Cherry']);
+
+    for (var i = 0; i < box.length; i++) {
+      final value = box.getAt(i);
+      print('$i: $value');
+    }
+    ```
+  </Tab>
+
+  <Tab title="By key">
+    ```dart
+    final box = Hive.box();
+    box.addAll(['Apple', 'Banana', 'Cherry']);
+
+    for (final key in box.keys) {
+      final value = box.get(key);
+      print('$key: $value');
+    }
+    ```
+  </Tab>
+
+  <Tab title="With enumerate">
+    ```dart
+    final box = Hive.box();
+    box.addAll(['Apple', 'Banana', 'Cherry']);
+
+    final keys = box.keys.toList();
+    for (var i = 0; i < keys.length; i++) {
+      final key = keys[i];
+      final value = box.getAt(i);
+      print('$i ($key): $value');
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Common list patterns
+
+<Steps>
+  <Step title="Append items">
+    ```dart
+    final box = Hive.box();
+
+    // Append one item
+    box.add('New Item');
+
+    // Append multiple items
+    box.addAll(['Item 1', 'Item 2', 'Item 3']);
+    ```
+  </Step>
+
+  <Step title="Get first and last">
+    ```dart
+    final first = box.length > 0 ? box.getAt(0) : null;
+    final last = box.length > 0 ? box.getAt(box.length - 1) : null;
+
+    print('First: $first');
+    print('Last: $last');
+    ```
+  </Step>
+
+  <Step title="Remove first or last">
+    ```dart
+    // Remove first
+    if (box.length > 0) {
+      box.deleteAt(0);
+    }
+
+    // Remove last
+    if (box.length > 0) {
+      box.deleteAt(box.length - 1);
+    }
+    ```
+  </Step>
+
+  <Step title="Check if empty">
+    ```dart
+    if (box.isEmpty) {
+      print('Box is empty');
+    }
+
+    if (box.isNotEmpty) {
+      print('Box has ${box.length} items');
+    }
+    ```
+  </Step>
+</Steps>
+
+## Converting to List
+
+Extract all values as a Dart list:
+
+```dart
+final box = Hive.box<String>();
+box.addAll(['Apple', 'Banana', 'Cherry']);
+
+// Method 1: Using getRange
+final list1 = box.getRange(0, box.length);
+
+// Method 2: Manual iteration
+final list2 = <String>[];
+for (var i = 0; i < box.length; i++) {
+  list2.add(box.getAt(i));
+}
+
+// Method 3: Using map
+final list3 = List.generate(
+  box.length,
+  (index) => box.getAt(index),
+);
+
+print(list1); // [Apple, Banana, Cherry]
+```
+
+## Queue operations
+
+Implement queue-like behavior:
+
+<CodeGroup>
+```dart FIFO Queue
+class FifoQueue {
+  final Box box;
+
+  FifoQueue(this.box);
+
+  void enqueue(dynamic item) {
+    box.add(item);
+  }
+
+  dynamic dequeue() {
+    if (box.isEmpty) return null;
+    final item = box.getAt(0);
+    box.deleteAt(0);
+    return item;
+  }
+
+  bool get isEmpty => box.isEmpty;
+  int get length => box.length;
+}
+```
+
+```dart LIFO Stack
+class LifoStack {
+  final Box box;
+
+  LifoStack(this.box);
+
+  void push(dynamic item) {
+    box.add(item);
+  }
+
+  dynamic pop() {
+    if (box.isEmpty) return null;
+    final index = box.length - 1;
+    final item = box.getAt(index);
+    box.deleteAt(index);
+    return item;
+  }
+
+  dynamic peek() {
+    if (box.isEmpty) return null;
+    return box.getAt(box.length - 1);
+  }
+
+  bool get isEmpty => box.isEmpty;
+  int get length => box.length;
+}
+```
+</CodeGroup>
+
+## Performance considerations
+
+<Steps>
+  <Step title="Batch operations">
+    Use `addAll()` instead of multiple `add()` calls:
+
+    ```dart
+    // Good
+    box.addAll(['A', 'B', 'C', 'D']);
+
+    // Less efficient
+    box.add('A');
+    box.add('B');
+    box.add('C');
+    box.add('D');
+    ```
+  </Step>
+
+  <Step title="Avoid excessive deletions">
+    Deleting from the beginning is expensive as it shifts all items:
+
+    ```dart
+    // Expensive - shifts all items
+    box.deleteAt(0);
+
+    // Better - delete from the end
+    box.deleteAt(box.length - 1);
+
+    // Best - use clear() for bulk deletion
+    box.clear();
+    ```
+  </Step>
+
+  <Step title="Cache length">
+    Cache the length if you need it multiple times:
+
+    ```dart
+    final length = box.length;
+    for (var i = 0; i < length; i++) {
+      print(box.getAt(i));
+    }
+    ```
+  </Step>
+</Steps>
+
+## Error handling
+
+Handle common errors with index operations:
+
+```dart
+try {
+  final value = box.getAt(index);
+  print(value);
+} catch (e) {
+  if (e is RangeError) {
+    print('Index $index is out of bounds (length: ${box.length})');
+  } else {
+    print('Error: $e');
+  }
+}
+
+// Or use bounds checking
+if (index >= 0 && index < box.length) {
+  final value = box.getAt(index);
+  print(value);
+} else {
+  print('Invalid index');
+}
+```

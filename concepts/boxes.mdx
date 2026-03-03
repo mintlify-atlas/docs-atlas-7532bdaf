@@ -1,0 +1,332 @@
+---
+title: Boxes
+description: Learn about boxes, the core storage containers in Hive
+---
+
+Boxes are the fundamental storage containers in Hive. Think of them as flexible key-value stores similar to maps, but with persistence built in. Unlike traditional SQL tables with rigid schemas, boxes can store a variety of data types and adapt to your needs.
+
+## What is a box?
+
+A box is a persistent key-value store where string keys map to values of any supported type. You can think of a box as a `Map<String, dynamic>` that automatically saves to disk.
+
+Each box is stored as a separate file on disk (either `.isar` or `.sqlite` format), making them lightweight and independent from one another.
+
+## Opening boxes
+
+Opening a box is simple and instantaneous. The first time you call `Hive.box()` with a specific name, Hive creates a new box. Subsequent calls with the same name return the existing box instance.
+
+```dart
+// Open or get the default box
+final box = Hive.box();
+
+// Open or get a named box
+final settingsBox = Hive.box(name: 'settings');
+final userBox = Hive.box(name: 'users');
+```
+
+<Note>
+If you call `Hive.box()` with the same name multiple times, you'll get the same box instance. Hive manages box instances internally to ensure consistency.
+</Note>
+
+### Box configuration options
+
+When opening a box, you can customize its behavior with several parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `name` | A unique identifier for your box. Defaults to `'hive'` |
+| `directory` | Custom storage location. Falls back to `Hive.defaultDirectory` if not specified |
+| `encryptionKey` | Enable encryption with a 256-bit AES key |
+| `maxSizeMiB` | Maximum box size in megabytes (default: 5 MiB) |
+
+```dart
+final box = Hive.box(
+  name: 'secure_data',
+  directory: '/custom/path',
+  encryptionKey: 'your-256-bit-encryption-key',
+  maxSizeMiB: 10,
+);
+```
+
+<Warning>
+If you try to open an existing box with a different generic type, Hive will throw an error. For example, opening `Hive.box<int>(name: 'myBox')` after previously opening `Hive.box<String>(name: 'myBox')` will fail.
+</Warning>
+
+## Setting up Hive
+
+Before using boxes, you need to tell Hive where to store data by setting a default directory:
+
+```dart
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Set the default directory for all boxes
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+  
+  // Now you can use Hive
+  final box = Hive.box();
+  box.put('initialized', true);
+}
+```
+
+## Accessing box data
+
+Boxes provide multiple ways to interact with your data:
+
+### Map-like access
+
+Use boxes just like regular Dart maps:
+
+```dart
+final box = Hive.box();
+
+// Write data
+box['username'] = 'flutter_dev';
+box['score'] = 42;
+
+// Read data
+final username = box['username'];
+final score = box['score'];
+```
+
+### Method-based access
+
+Use explicit methods for more control:
+
+```dart
+// Write with put()
+box.put('level', 5);
+box.put('achievements', ['first_win', 'speed_demon']);
+
+// Read with get()
+final level = box.get('level');
+final achievements = box.get('achievements');
+
+// Provide default values
+final lives = box.get('lives', defaultValue: 3);
+```
+
+### List-like access
+
+Boxes can also be used with integer indices like lists:
+
+```dart
+final box = Hive.box();
+
+// Add values sequentially
+box.add('Item 1');
+box.add('Item 2');
+box.add('Item 3');
+
+// Access by index
+print(box.getAt(0)); // Item 1
+print(box.getAt(1)); // Item 2
+print(box[2]);       // Item 3
+
+// Update by index
+box.putAt(0, 'Updated Item 1');
+```
+
+<Tip>
+Even when you mix string keys and auto-increment additions, you can still access all values by their index. The index represents the insertion order.
+</Tip>
+
+## Box operations
+
+### Checking contents
+
+```dart
+final box = Hive.box();
+
+// Check if a key exists
+if (box.containsKey('username')) {
+  print('Username is set');
+}
+
+// Get box size
+print('Box contains ${box.length} items');
+
+// Check if empty
+if (box.isEmpty) {
+  print('Box is empty');
+}
+
+// Get all keys
+final keys = box.keys;
+print('Keys: $keys');
+```
+
+### Batch operations
+
+```dart
+// Add multiple items
+box.putAll({
+  'name': 'Alice',
+  'age': 30,
+  'city': 'San Francisco',
+});
+
+// Get multiple values
+final values = box.getAll(['name', 'age', 'city']);
+
+// Delete multiple keys
+box.deleteAll(['age', 'city']);
+```
+
+### Range operations
+
+```dart
+// Get a range of values by index
+final items = box.getRange(0, 10); // First 10 items
+
+// Update a range
+box.putRange(0, 3, ['New 1', 'New 2', 'New 3']);
+
+// Delete a range
+box.deleteRange(5, 10);
+```
+
+## Deleting data
+
+Remove data from boxes in several ways:
+
+```dart
+// Delete a single key
+final deleted = box.delete('username');
+print('Deleted: $deleted'); // true if key existed
+
+// Delete by index
+box.deleteAt(0);
+
+// Clear all data
+box.clear();
+```
+
+## Closing boxes
+
+In most cases, you don't need to close boxes. However, when you're completely done with a box, you can close it:
+
+```dart
+// Close the box (but keep it on disk)
+box.close();
+
+// Close and delete from disk
+box.deleteFromDisk();
+```
+
+<Warning>
+Calling `box.close()` closes the box for ALL references to it, even in other parts of your code. Only close boxes when you're certain they won't be accessed again.
+</Warning>
+
+### Closing all boxes
+
+```dart
+// Close all open boxes
+Hive.closeAllBoxes();
+
+// Close and delete all boxes from disk
+Hive.deleteAllBoxesFromDisk();
+```
+
+## Box properties
+
+Every box exposes useful properties:
+
+```dart
+final box = Hive.box(name: 'myBox');
+
+print(box.name);        // 'myBox'
+print(box.directory);   // '/path/to/storage'
+print(box.isOpen);      // true
+print(box.length);      // Number of entries
+print(box.isEmpty);     // true if no entries
+print(box.isNotEmpty);  // true if has entries
+```
+
+## Best practices
+
+<Tip>
+**Keep box count reasonable**: Each box is a separate file. While you can create many boxes, it's more efficient to organize data within fewer boxes when possible.
+</Tip>
+
+<Tip>
+**Set appropriate size limits**: Use the `maxSizeMiB` parameter to prevent boxes from growing too large. The default of 5 MiB is suitable for most use cases.
+</Tip>
+
+<Tip>
+**Reuse box instances**: Get the same box instance with `Hive.box()` throughout your app rather than passing box references around.
+</Tip>
+
+<Warning>
+**Don't store binary data directly**: For images, videos, or large files, store them as separate files and keep only the file paths in Hive.
+</Warning>
+
+## Common patterns
+
+### Application settings
+
+```dart
+final settings = Hive.box(name: 'settings');
+
+void saveTheme(String theme) {
+  settings.put('theme', theme);
+}
+
+String getTheme() {
+  return settings.get('theme', defaultValue: 'light');
+}
+```
+
+### User session data
+
+```dart
+final session = Hive.box(name: 'session');
+
+void login(String token, String userId) {
+  session.putAll({
+    'token': token,
+    'userId': userId,
+    'loginTime': DateTime.now().toIso8601String(),
+  });
+}
+
+void logout() {
+  session.clear();
+}
+
+bool isLoggedIn() {
+  return session.containsKey('token');
+}
+```
+
+### Cache management
+
+```dart
+final cache = Hive.box(name: 'cache');
+
+void cacheData(String key, dynamic data) {
+  cache.put(key, {
+    'data': data,
+    'timestamp': DateTime.now().millisecondsSinceEpoch,
+  });
+}
+
+dynamic getCachedData(String key, {int maxAgeMinutes = 60}) {
+  final entry = cache.get(key);
+  if (entry == null) return null;
+  
+  final timestamp = entry['timestamp'] as int;
+  final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+  
+  if (age > maxAgeMinutes * 60 * 1000) {
+    cache.delete(key);
+    return null;
+  }
+  
+  return entry['data'];
+}
+```

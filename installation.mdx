@@ -1,0 +1,235 @@
+---
+title: Installation
+description: Install Hive and its dependencies in your Flutter or Dart project
+---
+
+# Installation
+
+Get started with Hive in your Flutter or Dart project. Installation takes just a few minutes and requires adding dependencies and initializing Hive with a storage directory.
+
+## Add dependencies
+
+<Steps>
+  <Step title="Add packages to pubspec.yaml">
+    Add `hive`, `isar_flutter_libs`, and `path_provider` to your project's dependencies:
+
+    ```yaml pubspec.yaml
+    dependencies:
+      hive: ^4.0.0
+      isar_flutter_libs: ^4.0.0-dev.13
+      path_provider: ^2.1.0
+    ```
+
+    <Note>
+      **Why these packages?**
+      - `hive` - The core Hive database
+      - `isar_flutter_libs` - Native libraries that power Hive
+      - `path_provider` - Helps find the optimal storage directory for each platform
+    </Note>
+  </Step>
+
+  <Step title="Install packages">
+    Run the following command in your project directory:
+
+    ```bash
+    flutter pub get
+    ```
+
+    For Dart-only projects, use:
+
+    ```bash
+    dart pub get
+    ```
+  </Step>
+</Steps>
+
+## Initialize Hive
+
+Before using Hive, you need to set the default directory where boxes will be stored.
+
+<Steps>
+  <Step title="Import required packages">
+    Add the necessary imports to your main Dart file:
+
+    ```dart
+    import 'package:flutter/material.dart';
+    import 'package:hive/hive.dart';
+    import 'package:path_provider/path_provider.dart';
+    ```
+  </Step>
+
+  <Step title="Set the default directory">
+    In your `main()` function, initialize Flutter bindings and set Hive's default directory:
+
+    ```dart
+    void main() async {
+      WidgetsFlutterBinding.ensureInitialized();
+      
+      final dir = await getApplicationDocumentsDirectory();
+      Hive.defaultDirectory = dir.path;
+
+      runApp(MyApp());
+    }
+    ```
+
+    <Note>
+      `WidgetsFlutterBinding.ensureInitialized()` is required when using async code in `main()` before calling `runApp()`.
+    </Note>
+  </Step>
+</Steps>
+
+## Platform-specific considerations
+
+### Flutter projects
+
+For Flutter apps, the setup above works across all platforms (iOS, Android, web, desktop). The `path_provider` package automatically selects the appropriate storage location for each platform:
+
+- **iOS/macOS** - `NSDocumentDirectory`
+- **Android** - `getApplicationDocumentsDirectory()`
+- **Windows** - `%USERPROFILE%\Documents`
+- **Linux** - `$HOME/Documents`
+- **Web** - IndexedDB (browser storage)
+
+### Dart-only projects
+
+For Dart CLI or server applications, you can set the directory manually:
+
+```dart
+import 'package:hive/hive.dart';
+import 'dart:io';
+
+void main() {
+  // Set a custom directory
+  Hive.defaultDirectory = Directory.current.path;
+  
+  // Now you can use Hive
+  final box = Hive.box();
+  box.put('server', 'running');
+}
+```
+
+### Custom storage location
+
+You can override the default directory for individual boxes:
+
+```dart
+final box = Hive.box(
+  name: 'myBox',
+  directory: '/custom/path/to/storage',
+);
+```
+
+Or use different directories for different purposes:
+
+```dart
+final cacheDir = await getTemporaryDirectory();
+final cacheBox = Hive.box(
+  name: 'cache',
+  directory: cacheDir.path,
+);
+
+final appDir = await getApplicationDocumentsDirectory();
+final dataBox = Hive.box(
+  name: 'data',
+  directory: appDir.path,
+);
+```
+
+## Configuration options
+
+When opening a box, you can configure several options:
+
+### Box size limit
+
+Set a maximum size for your box to prevent excessive disk usage:
+
+```dart
+final box = Hive.box(
+  name: 'limitedBox',
+  maxSizeMiB: 10, // Maximum 10 MiB
+);
+```
+
+<Note>
+  The default maximum size is 5 MiB. It's recommended to set this to a modest value to prevent unbounded growth.
+</Note>
+
+### Encryption
+
+Encrypt sensitive data with a 256-bit encryption key:
+
+```dart
+final box = Hive.box(
+  name: 'secrets',
+  encryptionKey: 'your-256-bit-encryption-key-here',
+);
+```
+
+<Warning>
+  Keep your encryption key safe! If you lose it, you won't be able to decrypt your data. Store keys securely using packages like `flutter_secure_storage`.
+</Warning>
+
+## Verify installation
+
+Test that everything is working correctly:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+
+  // Test Hive
+  final box = Hive.box();
+  box.put('test', 'Hello Hive!');
+  print(box.get('test')); // Should print: Hello Hive!
+
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        appBar: AppBar(title: Text('Hive Test')),
+        body: Center(
+          child: Text('Hive is working!'),
+        ),
+      ),
+    );
+  }
+}
+```
+
+If you see "Hello Hive!" printed in the console, you're all set!
+
+## Troubleshooting
+
+### Missing native libraries
+
+If you get errors about missing native libraries, ensure `isar_flutter_libs` is in your `pubspec.yaml` and run:
+
+```bash
+flutter clean
+flutter pub get
+```
+
+### Directory permissions
+
+If you encounter permission errors, verify that your app has write access to the chosen directory. On iOS, ensure you're using `getApplicationDocumentsDirectory()` rather than a restricted location.
+
+### Web platform issues
+
+On web, Hive uses IndexedDB for storage. Make sure your browser supports IndexedDB and that it's not disabled in browser settings.
+
+## Next steps
+
+<Card title="Quickstart tutorial" icon="rocket" href="/quickstart">
+  Now that Hive is installed, build your first app with our quickstart guide
+</Card>

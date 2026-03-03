@@ -1,0 +1,453 @@
+---
+title: Isolates
+description: Use Hive across multiple isolates for concurrent access and background operations
+---
+
+Hive provides excellent multi-isolate support, allowing you to access your boxes from multiple isolates simultaneously. This enables background operations without blocking your UI and maximizes performance on multi-core devices.
+
+## What are isolates?
+
+In Dart, isolates are independent workers that run concurrently. Unlike threads in other languages, isolates don't share memory. Each isolate has its own memory heap, making them safe from race conditions.
+
+Isolates are perfect for:
+- **Background processing**: Keep the UI responsive during heavy operations
+- **Parallel execution**: Utilize multiple CPU cores
+- **Concurrent database access**: Multiple isolates reading/writing simultaneously
+
+<Note>
+Hive is designed to be isolate-safe. You can access the same box from multiple isolates without worrying about data corruption or race conditions.
+</Note>
+
+## Using Hive.compute()
+
+The simplest way to use Hive in a background isolate is with `Hive.compute()`:
+
+```dart
+final box = Hive.box();
+box.put('status', 'pending');
+
+// Run operation in background isolate
+final result = await Hive.compute(() {
+  final box = Hive.box();
+  
+  // Access the same box in background
+  print(box.get('status')); // pending
+  
+  // Update data
+  box.put('status', 'processing');
+  
+  // Perform heavy computation
+  var sum = 0;
+  for (int i = 0; i < 1000000; i++) {
+    sum += i;
+  }
+  
+  box.put('status', 'completed');
+  return sum;
+});
+
+print('Result: $result');
+print('Status: ${box.get('status')}'); // completed
+```
+
+### Automatic resource management
+
+`Hive.compute()` handles setup and cleanup automatically:
+
+1. **Setup**: Initializes Hive in the new isolate with your type registry and default directory
+2. **Execution**: Runs your function in the background
+3. **Cleanup**: Closes all boxes opened in the isolate
+4. **Return**: Sends the result back to the main isolate
+
+```dart
+Hive.registerAdapter('User', User.fromJson);
+Hive.defaultDirectory = '/path/to/storage';
+
+// Type adapters and directory are automatically available in compute
+await Hive.compute(() {
+  final box = Hive.box(); // Uses registered adapters and directory
+  final user = User(name: 'Alice', email: 'alice@example.com', age: 30);
+  box.put('user', user); // Works with custom objects
+});
+```
+
+<Tip>
+Use `Hive.compute()` for most background operations. It's simpler and safer than manually managing isolates.
+</Tip>
+
+## Manual isolate management
+
+For more control, you can use Dart's `Isolate` API directly:
+
+```dart
+import 'dart:isolate';
+
+void backgroundTask() {
+  // Set up Hive in the new isolate
+  Hive.defaultDirectory = '/path/to/storage';
+  Hive.registerAdapter('User', User.fromJson);
+  
+  // Now you can use boxes
+  final box = Hive.box();
+  box.put('background', 'task completed');
+}
+
+void main() async {
+  // Start background isolate
+  await Isolate.spawn(backgroundTask, null);
+  
+  // Give it time to complete
+  await Future.delayed(Duration(seconds: 1));
+  
+  // Access the data
+  final box = Hive.box();
+  print(box.get('background')); // task completed
+}
+```
+
+<Warning>
+When manually managing isolates, you must set up Hive's configuration (default directory, type adapters) in each isolate before using boxes.
+</Warning>
+
+## Concurrent access
+
+Multiple isolates can access the same box simultaneously:
+
+```dart
+final box = Hive.box();
+box.put('counter', 0);
+
+// Launch multiple concurrent operations
+final futures = List.generate(10, (i) {
+  return Hive.compute(() {
+    final box = Hive.box();
+    
+    // Each isolate increments the counter
+    box.write(() {
+      final current = box.get('counter', defaultValue: 0) as int;
+      box.put('counter', current + 1);
+    });
+  });
+});
+
+await Future.wait(futures);
+
+print('Final counter: ${box.get('counter')}'); // 10
+```
+
+<Note>
+Hive's transaction system ensures that concurrent writes don't interfere with each other. Each transaction executes atomically.
+</Note>
+
+## Watching changes across isolates
+
+You can observe changes made in other isolates using streams:
+
+```dart
+// In main isolate
+final box = Hive.box();
+
+// Watch for changes
+box.watch().listen((_) {
+  print('Box changed: ${box.get('status')}');
+});
+
+// Watch a specific key
+box.watchKey('status').listen((value) {
+  print('Status changed to: $value');
+});
+
+// Make changes in background isolate
+await Hive.compute(() {
+  final box = Hive.box();
+  box.put('status', 'processing');
+  
+  // Simulate work
+  sleep(Duration(seconds: 1));
+  
+  box.put('status', 'completed');
+});
+
+// The listeners in main isolate will fire
+```
+
+<Tip>
+Use `watch()` to keep your UI synchronized with background operations. This is perfect for progress indicators and status updates.
+</Tip>
+
+## Use cases
+
+### Background data sync
+
+```dart
+Future<void> syncDataInBackground() async {
+  await Hive.compute(() async {
+    final box = Hive.box();
+    
+    // Fetch from API
+    final response = await http.get(Uri.parse('https://api.example.com/data'));
+    final data = jsonDecode(response.body);
+    
+    // Store in Hive
+    box.write(() {
+      for (final item in data['items']) {
+        box.put('item_${item['id']}', item);
+      }
+      box.put('lastSync', DateTime.now().toIso8601String());
+    });
+  });
+}
+```
+
+### Heavy computation with caching
+
+```dart
+Future<List<int>> computeIntensiveTask(String id) async {
+  return await Hive.compute(() {
+    final box = Hive.box();
+    
+    // Check cache
+    final cached = box.get('result_$id');
+    if (cached != null) {
+      return (cached as List).cast<int>();
+    }
+    
+    // Perform heavy computation
+    final result = <int>[];
+    for (int i = 0; i < 1000000; i++) {
+      result.add(i * i);
+    }
+    
+    // Cache result
+    box.put('result_$id', result);
+    return result;
+  });
+}
+```
+
+### Parallel batch processing
+
+```dart
+Future<void> processInParallel(List<String> items) async {
+  // Split items into chunks
+  final chunkSize = (items.length / 4).ceil();
+  final chunks = <List<String>>[];
+  
+  for (int i = 0; i < items.length; i += chunkSize) {
+    chunks.add(items.sublist(i, min(i + chunkSize, items.length)));
+  }
+  
+  // Process each chunk in parallel
+  final futures = chunks.map((chunk) {
+    return Hive.compute(() {
+      final box = Hive.box();
+      
+      for (final item in chunk) {
+        // Process and store
+        final processed = processItem(item);
+        box.put('processed_$item', processed);
+      }
+    });
+  });
+  
+  await Future.wait(futures);
+}
+```
+
+### Database migration
+
+```dart
+Future<void> migrateDataInBackground() async {
+  await Hive.compute(() {
+    final oldBox = Hive.box(name: 'oldData');
+    final newBox = Hive.box(name: 'newData');
+    
+    newBox.write(() {
+      for (final key in oldBox.keys) {
+        final value = oldBox.get(key);
+        // Transform data
+        final transformed = transformData(value);
+        newBox.put(key, transformed);
+      }
+    });
+    
+    // Clean up old box
+    oldBox.deleteFromDisk();
+  });
+}
+```
+
+## Performance considerations
+
+### Isolate overhead
+
+Creating isolates has overhead. Use them wisely:
+
+```dart
+// Bad: Creating isolate for trivial operation
+await Hive.compute(() {
+  final box = Hive.box();
+  box.put('key', 'value'); // Too simple for isolate overhead
+});
+
+// Good: Use isolates for heavy operations
+await Hive.compute(() {
+  final box = Hive.box();
+  
+  // Heavy computation
+  for (int i = 0; i < 1000000; i++) {
+    box.put('key_$i', complexCalculation(i));
+  }
+});
+```
+
+<Tip>
+Use isolates when operations take more than ~100ms. For quick operations, the isolate overhead may be greater than the operation itself.
+</Tip>
+
+### Batch operations in isolates
+
+Combine transactions with isolates for maximum performance:
+
+```dart
+await Hive.compute(() {
+  final box = Hive.box();
+  
+  // Single transaction for all operations
+  box.write(() {
+    for (int i = 0; i < 10000; i++) {
+      box.put('item_$i', generateData(i));
+    }
+  });
+});
+```
+
+## Debugging isolates
+
+Set a debug name for easier debugging:
+
+```dart
+await Hive.compute(
+  () {
+    final box = Hive.box();
+    // Your background work
+  },
+  debugName: 'DataSyncIsolate',
+);
+```
+
+The debug name appears in debugger tools, making it easier to identify isolates.
+
+## Best practices
+
+<Tip>
+**Use Hive.compute() for simplicity**: It handles setup and cleanup automatically.
+</Tip>
+
+<Tip>
+**Keep isolates focused**: Each isolate should perform a single, well-defined task.
+</Tip>
+
+<Tip>
+**Use transactions in isolates**: Wrap multiple operations in transactions for better performance.
+</Tip>
+
+<Tip>
+**Watch for changes**: Use streams to keep your UI synchronized with background operations.
+</Tip>
+
+<Warning>
+**Don't over-isolate**: Creating too many isolates wastes resources. Use them for genuinely heavy operations.
+</Warning>
+
+<Warning>
+**Initialize Hive in each isolate**: When managing isolates manually, remember to set up Hive's configuration.
+</Warning>
+
+## Common patterns
+
+### UI-responsive data loading
+
+```dart
+class DataLoader extends StatefulWidget {
+  @override
+  _DataLoaderState createState() => _DataLoaderState();
+}
+
+class _DataLoaderState extends State<DataLoader> {
+  bool _loading = true;
+  
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+  
+  Future<void> _loadData() async {
+    // Load data in background to keep UI responsive
+    await Hive.compute(() {
+      final box = Hive.box();
+      
+      // Simulate heavy loading
+      for (int i = 0; i < 10000; i++) {
+        box.put('item_$i', {'index': i, 'data': 'value_$i'});
+      }
+    });
+    
+    setState(() {
+      _loading = false;
+    });
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return CircularProgressIndicator();
+    }
+    return Text('Data loaded');
+  }
+}
+```
+
+### Progress tracking
+
+```dart
+final progressStream = StreamController<double>();
+
+Future<void> processWithProgress(List<String> items) async {
+  final box = Hive.box();
+  
+  // Set up progress watcher
+  box.watchKey('progress').listen((value) {
+    progressStream.add(value as double);
+  });
+  
+  // Process in background
+  await Hive.compute(() {
+    final box = Hive.box();
+    final total = items.length;
+    
+    for (int i = 0; i < total; i++) {
+      processItem(items[i]);
+      
+      // Update progress
+      box.put('progress', (i + 1) / total);
+    }
+  });
+  
+  progressStream.close();
+}
+```
+
+## Isolate safety guarantees
+
+Hive provides strong guarantees for multi-isolate access:
+
+1. **Data consistency**: Transactions ensure atomic operations across isolates
+2. **No data corruption**: Multiple isolates can write safely without corruption
+3. **Visibility**: Changes in one isolate are visible to others after commit
+4. **No deadlocks**: Hive's lock-free design prevents deadlocks
+
+<Note>
+Hive is built on top of Isar (or SQLite for encrypted boxes), both of which are designed for concurrent access. You can confidently use multiple isolates without worrying about data integrity.
+</Note>

@@ -1,0 +1,499 @@
+---
+title: Encryption
+description: Secure your Hive boxes with AES-256 encryption and learn best practices for key management
+---
+
+Hive 4.x provides built-in encryption support using 256-bit AES encryption in CBC mode. Each database page is encrypted separately, ensuring your sensitive data remains secure.
+
+## Basic encryption setup
+
+To encrypt a box, simply provide an `encryptionKey` when opening it:
+
+```dart
+final box = Hive.box(
+  name: 'secureBox',
+  encryptionKey: 'my-super-secret-key-that-is-long',
+);
+
+box.put('password', 'secret123');
+box.put('apiToken', 'sk_live_...');
+```
+
+<Warning>
+The encryption key must be kept secret and secure. If you lose the key, there is no way to recover your encrypted data.
+</Warning>
+
+## How Hive encryption works
+
+When you provide an `encryptionKey`, Hive automatically switches from the Isar engine to the SQLite engine with encryption enabled:
+
+```dart
+// From lib/src/hive.dart:80
+final isar = Isar.open(
+  name: name,
+  schemas: [FrameSchema],
+  directory: dir,
+  engine: encryptionKey != null ? IsarEngine.sqlite : IsarEngine.isar,
+  maxSizeMiB: maxSizeMiB,
+  encryptionKey: encryptionKey,
+  inspector: false,
+);
+```
+
+Key encryption details:
+
+- **Algorithm**: 256-bit AES in CBC mode
+- **Granularity**: Each database page is encrypted separately
+- **Engine**: Uses SQLite with SQLCipher when encryption is enabled
+- **Performance**: Minimal overhead for read/write operations
+
+<Note>
+Hive uses SQLCipher, a battle-tested SQLite extension that provides transparent 256-bit AES encryption of database files.
+</Note>
+
+## Encryption key requirements
+
+Your encryption key should be:
+
+1. **Long enough**: At least 32 characters for strong security
+2. **Random**: Generated using a secure random number generator
+3. **Unique**: Different for each user or box containing sensitive data
+4. **Secret**: Never hardcoded or committed to version control
+
+```dart
+import 'dart:math';
+import 'dart:convert';
+
+// ❌ Bad - hardcoded, short, predictable
+final box = Hive.box(
+  encryptionKey: '1234',
+);
+
+// ✅ Good - secure key from secure storage
+final secureKey = await secureStorage.read(key: 'hive_encryption_key');
+final box = Hive.box(
+  encryptionKey: secureKey,
+);
+```
+
+## Generating encryption keys
+
+### Using flutter_secure_storage
+
+The recommended approach is to generate a key once and store it securely:
+
+```dart
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'dart:math';
+import 'dart:convert';
+
+class EncryptionKeyManager {
+  static const _storage = FlutterSecureStorage();
+  static const _keyName = 'hive_encryption_key';
+
+  /// Get or generate encryption key
+  static Future<String> getOrCreateKey() async {
+    // Try to read existing key
+    var key = await _storage.read(key: _keyName);
+    
+    if (key == null) {
+      // Generate new key
+      key = _generateSecureKey();
+      await _storage.write(key: _keyName, value: key);
+    }
+    
+    return key;
+  }
+
+  /// Generate a cryptographically secure key
+  static String _generateSecureKey() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    return base64Url.encode(bytes);
+  }
+
+  /// Delete the encryption key (use with caution!)
+  static Future<void> deleteKey() async {
+    await _storage.delete(key: _keyName);
+  }
+}
+```
+
+Usage:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+  
+  // Get or create encryption key
+  final encryptionKey = await EncryptionKeyManager.getOrCreateKey();
+  
+  // Open encrypted box
+  final box = Hive.box(
+    name: 'secureData',
+    encryptionKey: encryptionKey,
+  );
+  
+  runApp(MyApp());
+}
+```
+
+<Tip>
+Use `flutter_secure_storage` to store encryption keys. It uses the Keychain on iOS, KeyStore on Android, and appropriate secure storage on other platforms.
+</Tip>
+
+### Per-user encryption
+
+For multi-user applications, generate unique keys per user:
+
+```dart
+class UserEncryptionManager {
+  static const _storage = FlutterSecureStorage();
+
+  static Future<String> getKeyForUser(String userId) async {
+    final keyName = 'hive_key_$userId';
+    var key = await _storage.read(key: keyName);
+    
+    if (key == null) {
+      key = _generateSecureKey();
+      await _storage.write(key: keyName, value: key);
+    }
+    
+    return key;
+  }
+
+  static Future<void> deleteUserKey(String userId) async {
+    await _storage.delete(key: 'hive_key_$userId');
+  }
+
+  static String _generateSecureKey() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    return base64Url.encode(bytes);
+  }
+}
+
+// Usage
+final userKey = await UserEncryptionManager.getKeyForUser(currentUser.id);
+final userBox = Hive.box(
+  name: 'user_${currentUser.id}',
+  encryptionKey: userKey,
+);
+```
+
+## Opening encrypted boxes
+
+Once a box is encrypted, you must provide the same key every time you open it:
+
+```dart
+// Initial creation with encryption
+final box1 = Hive.box(
+  name: 'myBox',
+  encryptionKey: 'my-secret-key',
+);
+
+// Later, opening the same box
+final box2 = Hive.box(
+  name: 'myBox',
+  encryptionKey: 'my-secret-key', // Must use the same key
+);
+
+// Returns the same instance since box is already open
+assert(identical(box1, box2));
+```
+
+<Warning>
+If you try to open an encrypted box without providing the key, or with the wrong key, Hive will throw an error. There is no way to recover data without the correct key.
+</Warning>
+
+## Encryption and multiple isolates
+
+When using encryption with multiple isolates, ensure the encryption key is available in each isolate:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+  
+  final encryptionKey = await EncryptionKeyManager.getOrCreateKey();
+  
+  // Open encrypted box in main isolate
+  final box = Hive.box(
+    name: 'encrypted',
+    encryptionKey: encryptionKey,
+  );
+  
+  // Access from another isolate
+  await Hive.compute(() {
+    // Need to pass or retrieve the key in the isolate
+    final box = Hive.box(
+      name: 'encrypted',
+      encryptionKey: encryptionKey, // Must have access to the key
+    );
+    
+    box.put('secret', 'value');
+  });
+}
+```
+
+<Note>
+The encryption key is not automatically transferred between isolates. You must either pass it as a parameter or retrieve it from secure storage in each isolate.
+</Note>
+
+## Performance implications
+
+Encryption has minimal performance impact:
+
+- **Read operations**: Slightly slower due to decryption overhead
+- **Write operations**: Slightly slower due to encryption overhead
+- **Storage size**: Minimal increase (encryption metadata)
+- **Memory usage**: Same as non-encrypted boxes
+
+Benchmark example:
+
+```dart
+import 'dart:io';
+
+void main() async {
+  // Non-encrypted box
+  final plainBox = Hive.box(name: 'plain');
+  final sw1 = Stopwatch()..start();
+  for (var i = 0; i < 10000; i++) {
+    plainBox.put('key_$i', 'value_$i');
+  }
+  print('Plain: ${sw1.elapsedMilliseconds}ms');
+  
+  // Encrypted box
+  final encryptedBox = Hive.box(
+    name: 'encrypted',
+    encryptionKey: 'my-encryption-key-for-testing',
+  );
+  final sw2 = Stopwatch()..start();
+  for (var i = 0; i < 10000; i++) {
+    encryptedBox.put('key_$i', 'value_$i');
+  }
+  print('Encrypted: ${sw2.elapsedMilliseconds}ms');
+  
+  // Typically: 5-15% slower for encrypted boxes
+}
+```
+
+<Tip>
+For most applications, the encryption overhead is negligible compared to the security benefits. Use encryption for any box containing sensitive data.
+</Tip>
+
+## What to encrypt
+
+Use encryption for boxes containing:
+
+- User credentials and authentication tokens
+- Personal identifiable information (PII)
+- Financial data
+- Health records
+- Private messages
+- API keys and secrets
+
+You may skip encryption for:
+
+- Public data or cached content
+- App preferences and settings (unless sensitive)
+- Data already encrypted at rest by the OS
+
+```dart
+// Encrypted - contains sensitive data
+final authBox = Hive.box(
+  name: 'auth',
+  encryptionKey: await getEncryptionKey(),
+);
+authBox.put('accessToken', 'sk_live_...');
+authBox.put('refreshToken', '...');
+
+// Not encrypted - public cached data
+final cacheBox = Hive.box(name: 'cache');
+cacheBox.put('lastSyncTime', DateTime.now().toIso8601String());
+cacheBox.put('appVersion', '1.0.0');
+```
+
+## Changing encryption keys
+
+To change the encryption key of an existing box, you need to:
+
+1. Open the box with the old key
+2. Read all data
+3. Close the box
+4. Delete the box file
+5. Create a new box with the new key
+6. Write all data back
+
+```dart
+Future<void> changeEncryptionKey(
+  String boxName,
+  String oldKey,
+  String newKey,
+) async {
+  // Open with old key
+  final oldBox = Hive.box(name: boxName, encryptionKey: oldKey);
+  
+  // Read all data
+  final allData = <String, dynamic>{};
+  for (final key in oldBox.keys) {
+    allData[key] = oldBox.get(key);
+  }
+  
+  // Close and delete
+  oldBox.deleteFromDisk();
+  
+  // Create new box with new key
+  final newBox = Hive.box(name: boxName, encryptionKey: newKey);
+  
+  // Write data back
+  newBox.write(() {
+    newBox.putAll(allData);
+  });
+}
+```
+
+<Warning>
+Changing encryption keys requires reading all data into memory. For large boxes, this may consume significant memory and time.
+</Warning>
+
+## Key rotation strategy
+
+For high-security applications, implement key rotation:
+
+```dart
+class KeyRotationManager {
+  static const _rotationInterval = Duration(days: 90);
+  
+  static Future<bool> shouldRotateKey() async {
+    final lastRotation = await _storage.read(key: 'last_key_rotation');
+    if (lastRotation == null) return true;
+    
+    final lastDate = DateTime.parse(lastRotation);
+    return DateTime.now().difference(lastDate) > _rotationInterval;
+  }
+  
+  static Future<void> rotateKeys() async {
+    final oldKey = await EncryptionKeyManager.getOrCreateKey();
+    final newKey = EncryptionKeyManager._generateSecureKey();
+    
+    // Rotate all encrypted boxes
+    await changeEncryptionKey('secureData', oldKey, newKey);
+    await changeEncryptionKey('userInfo', oldKey, newKey);
+    
+    // Update stored key
+    await _storage.write(key: 'hive_encryption_key', value: newKey);
+    await _storage.write(
+      key: 'last_key_rotation',
+      value: DateTime.now().toIso8601String(),
+    );
+  }
+}
+```
+
+## Security best practices
+
+1. **Never hardcode keys**: Always retrieve keys from secure storage
+2. **Use secure random generation**: Use `Random.secure()` for key generation
+3. **Separate keys per user**: Don't share keys between users
+4. **Protect key storage**: Use platform-specific secure storage solutions
+5. **Implement key rotation**: Regularly rotate keys for sensitive applications
+6. **Clear keys on logout**: Remove encryption keys when users log out
+7. **Test key loss**: Implement key recovery or account reset flows
+
+```dart
+// ❌ Bad - hardcoded key
+final box = Hive.box(
+  encryptionKey: 'hardcoded-key-in-source-code',
+);
+
+// ❌ Bad - weak key generation
+final weakKey = '12345';
+final box = Hive.box(encryptionKey: weakKey);
+
+// ✅ Good - secure key from secure storage
+final secureKey = await secureStorage.read(key: 'encryption_key');
+final box = Hive.box(encryptionKey: secureKey);
+
+// ✅ Good - clear keys on logout
+Future<void> logout() async {
+  Hive.closeAllBoxes();
+  await EncryptionKeyManager.deleteKey();
+  // Optionally delete box files
+  Hive.deleteAllBoxesFromDisk();
+}
+```
+
+## Troubleshooting
+
+### Wrong key error
+
+If you try to open a box with the wrong encryption key:
+
+```dart
+try {
+  final box = Hive.box(
+    name: 'encrypted',
+    encryptionKey: 'wrong-key',
+  );
+} catch (e) {
+  // Handle error - possibly prompt for correct key
+  // or reset the box if recovery is impossible
+  print('Failed to open box: $e');
+}
+```
+
+### Key not found
+
+Implement fallback logic for missing keys:
+
+```dart
+Future<Box> openSecureBox(String name) async {
+  String? key = await secureStorage.read(key: 'encryption_key');
+  
+  if (key == null) {
+    // First time - generate new key
+    key = EncryptionKeyManager._generateSecureKey();
+    await secureStorage.write(key: 'encryption_key', value: key);
+  }
+  
+  return Hive.box(name: name, encryptionKey: key);
+}
+```
+
+### Migration from unencrypted to encrypted
+
+To add encryption to an existing unencrypted box:
+
+```dart
+Future<void> migrateToEncrypted(String boxName) async {
+  // Open unencrypted box
+  final oldBox = Hive.box(name: boxName);
+  
+  // Read all data
+  final data = <String, dynamic>{};
+  for (final key in oldBox.keys) {
+    data[key] = oldBox.get(key);
+  }
+  
+  // Delete old box
+  oldBox.deleteFromDisk();
+  
+  // Create encrypted box
+  final encryptionKey = await EncryptionKeyManager.getOrCreateKey();
+  final newBox = Hive.box(
+    name: boxName,
+    encryptionKey: encryptionKey,
+  );
+  
+  // Write data to encrypted box
+  newBox.write(() {
+    newBox.putAll(data);
+  });
+}
+```

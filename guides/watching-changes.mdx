@@ -1,0 +1,552 @@
+---
+title: Watching changes
+description: Using watch() and watchKey() to reactively respond to data changes in Hive
+---
+
+Hive provides reactive streams that notify you when data changes in your boxes. This allows you to build responsive UIs and react to data modifications in real-time.
+
+## Watching specific keys
+
+Use `watchKey()` to monitor changes to a specific key:
+
+```dart
+final box = Hive.box();
+
+// Watch for changes to 'username'
+final subscription = box.watchKey('username').listen((value) {
+  print('Username changed to: $value');
+});
+
+// Trigger the listener
+box.put('username', 'Alice');  // Prints: Username changed to: Alice
+box.put('username', 'Bob');    // Prints: Username changed to: Bob
+
+// Clean up
+await subscription.cancel();
+```
+
+The stream emits the new value whenever the key is updated or deleted.
+
+## Watching all changes
+
+Use `watch()` to be notified of any change to the box:
+
+```dart
+final box = Hive.box();
+
+// Watch for any changes
+final subscription = box.watch().listen((_) {
+  print('Box was modified');
+});
+
+// These all trigger the listener
+box.put('key1', 'value1');     // Prints: Box was modified
+box.put('key2', 'value2');     // Prints: Box was modified
+box.delete('key1');            // Prints: Box was modified
+
+await subscription.cancel();
+```
+
+<Note>
+  The `watch()` stream doesn't provide information about what changed. Use it when you just need to know that something changed, not what specifically changed.
+</Note>
+
+## Reactive UI updates
+
+Integrate with Flutter's `StreamBuilder` for reactive UIs:
+
+```dart
+class UserProfile extends StatelessWidget {
+  final Box box = Hive.box();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: box.watchKey('username'),
+      builder: (context, snapshot) {
+        final username = snapshot.data ?? 'Guest';
+        return Text('Welcome, $username!');
+      },
+    );
+  }
+}
+```
+
+The UI automatically updates when the username changes.
+
+## Multiple key watchers
+
+Watch multiple keys simultaneously:
+
+```dart
+final box = Hive.box();
+
+// Watch username
+final userSubscription = box.watchKey('username').listen((value) {
+  print('Username: $value');
+});
+
+// Watch email
+final emailSubscription = box.watchKey('email').listen((value) {
+  print('Email: $value');
+});
+
+// Watch theme
+final themeSubscription = box.watchKey('theme').listen((value) {
+  print('Theme: $value');
+});
+
+// Changes only trigger their specific watchers
+box.put('username', 'Alice');  // Only prints username
+box.put('email', 'alice@example.com');  // Only prints email
+
+// Clean up all subscriptions
+await Future.wait([
+  userSubscription.cancel(),
+  emailSubscription.cancel(),
+  themeSubscription.cancel(),
+]);
+```
+
+## Watching deletions
+
+The stream emits `null` when a key is deleted:
+
+```dart
+final box = Hive.box();
+
+box.put('status', 'active');
+
+final subscription = box.watchKey('status').listen((value) {
+  if (value == null) {
+    print('Status was deleted');
+  } else {
+    print('Status: $value');
+  }
+});
+
+box.put('status', 'inactive');  // Prints: Status: inactive
+box.delete('status');           // Prints: Status was deleted
+
+await subscription.cancel();
+```
+
+## Broadcast streams
+
+Both `watch()` and `watchKey()` return broadcast streams, allowing multiple listeners:
+
+```dart
+final box = Hive.box();
+final stream = box.watchKey('counter');
+
+// First listener
+final sub1 = stream.listen((value) {
+  print('Listener 1: $value');
+});
+
+// Second listener
+final sub2 = stream.listen((value) {
+  print('Listener 2: $value');
+});
+
+box.put('counter', 42);
+// Both listeners print:
+// Listener 1: 42
+// Listener 2: 42
+
+await Future.wait([sub1.cancel(), sub2.cancel()]);
+```
+
+## Cross-isolate notifications
+
+The `watch()` stream is particularly useful for monitoring changes from other isolates:
+
+```dart
+final box = Hive.box();
+
+// In main isolate
+final subscription = box.watch().listen((_) {
+  print('Box changed in another isolate');
+});
+
+// In background isolate
+await Hive.compute(() {
+  final box = Hive.box();
+  box.put('backgroundData', 'Updated from isolate');
+});
+
+// Prints: Box changed in another isolate
+
+await subscription.cancel();
+```
+
+## Filtering changes
+
+Implement custom filtering logic:
+
+<Tabs>
+  <Tab title="Filter by value type">
+    ```dart
+    final box = Hive.box();
+
+    final subscription = box.watch().listen((_) {
+      // Only react to string values
+      for (final key in box.keys) {
+        final value = box.get(key);
+        if (value is String) {
+          print('String value changed: $key = $value');
+        }
+      }
+    });
+    ```
+  </Tab>
+
+  <Tab title="Filter by key pattern">
+    ```dart
+    final box = Hive.box();
+
+    final subscription = box.watch().listen((_) {
+      // Only react to user-related keys
+      for (final key in box.keys) {
+        if (key.startsWith('user_')) {
+          print('User data changed: $key');
+        }
+      }
+    });
+    ```
+  </Tab>
+
+  <Tab title="Debounce changes">
+    ```dart
+    import 'package:rxdart/rxdart.dart';
+
+    final box = Hive.box();
+
+    // Only emit after 500ms of no changes
+    final subscription = box.watch()
+      .debounceTime(Duration(milliseconds: 500))
+      .listen((_) {
+        print('Box settled after changes');
+      });
+    ```
+  </Tab>
+</Tabs>
+
+## Handling errors
+
+Handle stream errors gracefully:
+
+```dart
+final box = Hive.box();
+
+final subscription = box.watchKey('data').listen(
+  (value) {
+    print('Value: $value');
+  },
+  onError: (error) {
+    print('Stream error: $error');
+  },
+  onDone: () {
+    print('Stream closed');
+  },
+);
+
+await subscription.cancel();
+```
+
+## Silent changes
+
+Prevent notifications when clearing a box:
+
+```dart
+final box = Hive.box();
+
+final subscription = box.watch().listen((_) {
+  print('Box changed');
+});
+
+// Triggers notification
+box.clear();
+
+// Does not trigger notification
+box.clear(notify: false);
+
+await subscription.cancel();
+```
+
+## State management integration
+
+<Steps>
+  <Step title="With Provider">
+    ```dart
+    class UserStore extends ChangeNotifier {
+      final Box box = Hive.box();
+      late final StreamSubscription _subscription;
+
+      UserStore() {
+        _subscription = box.watchKey('user').listen((_) {
+          notifyListeners();
+        });
+      }
+
+      User? get user => box.get('user') as User?;
+
+      void setUser(User user) {
+        box.put('user', user);
+      }
+
+      @override
+      void dispose() {
+        _subscription.cancel();
+        super.dispose();
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="With BLoC">
+    ```dart
+    class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
+      final Box box = Hive.box();
+      late final StreamSubscription _subscription;
+
+      SettingsBloc() : super(SettingsInitial()) {
+        _subscription = box.watch().listen((_) {
+          add(SettingsChanged());
+        });
+      }
+
+      @override
+      Future<void> close() {
+        _subscription.cancel();
+        return super.close();
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="With Riverpod">
+    ```dart
+    final userProvider = StreamProvider.autoDispose<User?>((ref) {
+      final box = Hive.box();
+      return box.watchKey('user').map((value) => value as User?);
+    });
+
+    // In widget
+    class UserWidget extends ConsumerWidget {
+      @override
+      Widget build(BuildContext context, WidgetRef ref) {
+        final userAsync = ref.watch(userProvider);
+        return userAsync.when(
+          data: (user) => Text(user?.name ?? 'Guest'),
+          loading: () => CircularProgressIndicator(),
+          error: (err, stack) => Text('Error: $err'),
+        );
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Custom watchers
+
+Build higher-level abstractions:
+
+```dart
+class BoxWatcher<T> {
+  final Box box;
+  final String key;
+  final T Function(dynamic) converter;
+  StreamSubscription? _subscription;
+  final _controller = StreamController<T>.broadcast();
+
+  BoxWatcher({
+    required this.box,
+    required this.key,
+    required this.converter,
+  }) {
+    _subscription = box.watchKey(key).listen((value) {
+      try {
+        final converted = converter(value);
+        _controller.add(converted);
+      } catch (e) {
+        _controller.addError(e);
+      }
+    });
+  }
+
+  Stream<T> get stream => _controller.stream;
+
+  T get value {
+    final raw = box.get(key);
+    return converter(raw);
+  }
+
+  void dispose() {
+    _subscription?.cancel();
+    _controller.close();
+  }
+}
+
+// Usage
+final watcher = BoxWatcher<int>(
+  box: Hive.box(),
+  key: 'score',
+  converter: (value) => value as int? ?? 0,
+);
+
+watcher.stream.listen((score) {
+  print('Score: $score');
+});
+
+watcher.dispose();
+```
+
+## Performance tips
+
+<Steps>
+  <Step title="Cancel unused subscriptions">
+    Always cancel subscriptions when done:
+
+    ```dart
+    @override
+    void dispose() {
+      subscription.cancel();
+      super.dispose();
+    }
+    ```
+  </Step>
+
+  <Step title="Watch specific keys">
+    Use `watchKey()` instead of `watch()` when possible:
+
+    ```dart
+    // Good - only notified for specific key
+    box.watchKey('username').listen(...);
+
+    // Less efficient - notified for all changes
+    box.watch().listen(...);
+    ```
+  </Step>
+
+  <Step title="Debounce rapid changes">
+    Use debouncing for frequently changing values:
+
+    ```dart
+    import 'package:rxdart/rxdart.dart';
+
+    box.watchKey('search')
+      .debounceTime(Duration(milliseconds: 300))
+      .listen((query) {
+        performSearch(query);
+      });
+    ```
+  </Step>
+
+  <Step title="Batch reads in watch()">
+    When using `watch()`, batch your reads:
+
+    ```dart
+    box.watch().listen((_) {
+      // Read all needed values at once
+      box.read(() {
+        final user = box.get('user');
+        final settings = box.get('settings');
+        updateUI(user, settings);
+      });
+    });
+    ```
+  </Step>
+</Steps>
+
+## Common patterns
+
+<CodeGroup>
+```dart Auto-save form
+class AutoSaveForm extends StatefulWidget {
+  @override
+  State<AutoSaveForm> createState() => _AutoSaveFormState();
+}
+
+class _AutoSaveFormState extends State<AutoSaveForm> {
+  final box = Hive.box();
+  final controller = TextEditingController();
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    controller.text = box.get('draft', defaultValue: '');
+    controller.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(Duration(milliseconds: 500), () {
+      box.put('draft', controller.text);
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(controller: controller);
+  }
+}
+```
+
+```dart Sync indicator
+class SyncIndicator extends StatelessWidget {
+  final Box box = Hive.box();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: box.watchKey('lastSync'),
+      builder: (context, snapshot) {
+        final lastSync = snapshot.data as DateTime?;
+        if (lastSync == null) {
+          return Text('Never synced');
+        }
+        final diff = DateTime.now().difference(lastSync);
+        return Text('Synced ${diff.inMinutes}m ago');
+      },
+    );
+  }
+}
+```
+
+```dart Live counter
+class LiveCounter extends StatelessWidget {
+  final Box box = Hive.box();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: box.watchKey('counter').map((v) => v as int? ?? 0),
+      initialData: box.get('counter', defaultValue: 0),
+      builder: (context, snapshot) {
+        return Column(
+          children: [
+            Text('Count: ${snapshot.data}'),
+            ElevatedButton(
+              onPressed: () {
+                final count = box.get('counter', defaultValue: 0) as int;
+                box.put('counter', count + 1);
+              },
+              child: Text('Increment'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+```
+</CodeGroup>

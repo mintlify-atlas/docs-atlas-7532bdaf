@@ -1,0 +1,203 @@
+---
+title: Flutter app example
+description: Build a complete Flutter app with Hive to store and manage favorite flowers
+---
+
+This example demonstrates how to build a complete Flutter app using Hive for data persistence. You'll create a bee-themed app where users can vote for their favorite flowers and view their selections.
+
+## Prerequisites
+
+Before you begin, ensure you have Flutter installed and set up on your machine.
+
+## Create a new Flutter project
+
+Create a new Flutter app:
+
+```bash
+flutter create bee_favorites
+cd bee_favorites
+```
+
+## Add dependencies
+
+Add the required dependencies to your `pubspec.yaml`:
+
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  hive: ^4.0.0
+  isar_flutter_libs: ^4.0.0-dev.13
+  path_provider: ^2.0.0
+```
+
+<Note>
+  The `path_provider` package helps you find the optimal directory for each platform where Hive can store data.
+</Note>
+
+## Initialize Hive
+
+Set up Hive before running your app by setting the default directory:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final directory = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = directory.path;
+
+  runApp(BeeApp());
+}
+```
+
+## Build the app
+
+Create the main app widget:
+
+```dart
+class BeeApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Bee Favorites',
+      theme: ThemeData(primarySwatch: Colors.yellow),
+      home: FavoriteFlowers(),
+    );
+  }
+}
+```
+
+## Create the favorites screen
+
+Build the main screen that displays flowers and allows users to add favorites:
+
+```dart
+class FavoriteFlowers extends StatefulWidget {
+  @override
+  _FavoriteFlowersState createState() => _FavoriteFlowersState();
+}
+
+class _FavoriteFlowersState extends State<FavoriteFlowers> {
+  final Box<String> favoriteBox = Hive.box<String>('favorites');
+
+  final List<String> flowers = ['Rose', 'Tulip', 'Daisy', 'Lily', 'Sunflower'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Bee Favorites 🐝')),
+      body: ListView.builder(
+        itemCount: flowers.length,
+        itemBuilder: (context, index) {
+          final flower = flowers[index];
+          return ListTile(
+            title: Text(flower),
+            trailing: IconButton(
+              icon: Icon(Icons.star),
+              onPressed: () {
+                favoriteBox.add(flower);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$flower added to favorites! 🌼')),
+                );
+              },
+            ),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.view_list),
+        onPressed: () {
+          showDialog(
+            context: context,
+            builder: (context) => FavoritesDialog(favorites: favoriteBox.values.toList()),
+          );
+        },
+      ),
+    );
+  }
+}
+```
+
+<Tip>
+  The `Hive.box<String>()` method opens a box if it doesn't exist or returns the existing box. This means your data persists across app restarts.
+</Tip>
+
+## Create the favorites dialog
+
+Add a dialog to display all saved favorites:
+
+```dart
+class FavoritesDialog extends StatelessWidget {
+  final List<String> favorites;
+
+  FavoritesDialog({required this.favorites});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Bee Favorites 🌼'),
+      content: Container(
+        width: 300,
+        height: 200,
+        child: ListView.builder(
+          itemCount: favorites.length,
+          itemBuilder: (context, index) {
+            return ListTile(title: Text(favorites[index]));
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Close'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    );
+  }
+}
+```
+
+## Run the app
+
+Run your app:
+
+```bash
+flutter run
+```
+
+Every time a user selects a flower, it's added to the favorites list using `favoriteBox.add()`. You can view all favorites by tapping the floating action button.
+
+## How it works
+
+<Steps>
+  <Step title="Initialize Hive">
+    When the app starts, Hive is initialized with a directory path where data will be stored.
+  </Step>
+  
+  <Step title="Open a box">
+    The `Hive.box<String>('favorites')` call creates or opens a box named 'favorites' that stores strings.
+  </Step>
+  
+  <Step title="Add data">
+    When users tap the star icon, `favoriteBox.add(flower)` adds the flower name to the box.
+  </Step>
+  
+  <Step title="Read data">
+    The dialog reads all values from the box using `favoriteBox.values.toList()` to display them.
+  </Step>
+</Steps>
+
+<Note>
+  Data stored in Hive persists across app restarts. Try closing and reopening the app to see your favorites remain saved.
+</Note>
+
+## Next steps
+
+- Add functionality to remove favorites
+- Use the `box.delete()` method to clear specific entries
+- Implement a counter to track how many times each flower was selected
+- Try storing custom objects instead of just strings

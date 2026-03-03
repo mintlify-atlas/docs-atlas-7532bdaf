@@ -1,0 +1,169 @@
+---
+title: Opening boxes
+description: Learn how to open and configure Hive boxes with different options
+---
+
+Boxes are the primary containers for storing data in Hive. Think of them as tables in SQL, but more flexible—they don't require a fixed structure and can contain any type of data.
+
+## Opening your first box
+
+Opening a box in Hive is straightforward. When you call `Hive.box()` for the first time with a given name, Hive creates a new box. Subsequent calls with the same name return the existing box.
+
+```dart
+final box = Hive.box(name: 'myBox');
+```
+
+## Using the default box
+
+If you don't need multiple boxes, you can use the default box without specifying a name:
+
+```dart
+final box = Hive.box();
+```
+
+This is equivalent to calling `Hive.box(name: 'hive')`.
+
+## Configuration options
+
+<Steps>
+  <Step title="Set the storage directory">
+    Before opening any box, you must set a default directory where Hive will store its data:
+
+    ```dart
+    void main() async {
+      WidgetsFlutterBinding.ensureInitialized();
+      final dir = await getApplicationDocumentsDirectory();
+      Hive.defaultDirectory = dir.path;
+    }
+    ```
+
+    You can also specify a custom directory for individual boxes using the `directory` parameter.
+  </Step>
+
+  <Step title="Configure box parameters">
+    The `Hive.box()` method accepts several optional parameters:
+
+    | Parameter | Type | Description |
+    |-----------|------|-------------|
+    | `name` | `String` | A unique name for your box. Defaults to `'hive'` |
+    | `directory` | `String?` | Custom storage location. Falls back to `defaultDirectory` if omitted |
+    | `encryptionKey` | `String?` | Encryption key for securing your data |
+    | `maxSizeMiB` | `int` | Maximum box size in MiB. Defaults to 5 MiB |
+  </Step>
+
+  <Step title="Open the box">
+    ```dart
+    final box = Hive.box(
+      name: 'userSettings',
+      maxSizeMiB: 10,
+    );
+    ```
+  </Step>
+</Steps>
+
+## Encrypted boxes
+
+For sensitive data, you can encrypt your box by providing an encryption key. Hive uses 256-bit AES in CBC mode for encryption:
+
+```dart
+final secureBox = Hive.box(
+  name: 'credentials',
+  encryptionKey: 'your-secure-encryption-key',
+);
+```
+
+<Warning>
+  Keep your encryption key safe! If you lose it, you won't be able to access your encrypted data. Also, if you try to open an already-encrypted box with a different key, Hive will throw an error.
+</Warning>
+
+## Setting size limits
+
+It's recommended to set a reasonable `maxSizeMiB` value to prevent your box from growing too large:
+
+```dart
+final box = Hive.box(
+  name: 'cache',
+  maxSizeMiB: 20,
+);
+```
+
+If the box exceeds this limit, Hive will throw an exception.
+
+## Checking box state
+
+You can check if a box is currently open using the `isOpen` property:
+
+```dart
+if (box.isOpen) {
+  print('Box is ready to use');
+}
+```
+
+Other useful properties:
+
+```dart
+print('Box name: ${box.name}');
+print('Storage location: ${box.directory}');
+print('Number of entries: ${box.length}');
+print('Is empty: ${box.isEmpty}');
+```
+
+## Multiple boxes
+
+You can open multiple boxes in your application, each serving a different purpose:
+
+<CodeGroup>
+```dart User Data
+final userBox = Hive.box(name: 'users');
+```
+
+```dart Settings
+final settingsBox = Hive.box(name: 'settings');
+```
+
+```dart Cache
+final cacheBox = Hive.box(name: 'cache', maxSizeMiB: 50);
+```
+</CodeGroup>
+
+## Closing boxes
+
+It's generally not recommended to close boxes that you'll access again, as this creates unnecessary overhead. However, when you do need to close a box:
+
+```dart
+box.close();
+```
+
+To completely remove a box and its data from disk:
+
+```dart
+box.deleteFromDisk();
+```
+
+<Note>
+  Calling `box.close()` or `box.deleteFromDisk()` affects all instances of the box. Make sure you're not accessing the box elsewhere in your code after closing it.
+</Note>
+
+## Error handling
+
+Handle common errors when opening boxes:
+
+```dart
+try {
+  final box = Hive.box(
+    name: 'myBox',
+    directory: '/custom/path',
+  );
+} catch (e) {
+  if (e is ArgumentError) {
+    print('Invalid configuration: $e');
+  } else {
+    print('Failed to open box: $e');
+  }
+}
+```
+
+Common issues:
+- No directory specified and no default directory set
+- Opening a box with a different type than previously used
+- Invalid encryption key for an already-encrypted box

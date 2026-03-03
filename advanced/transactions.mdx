@@ -1,0 +1,641 @@
+---
+title: Transactions
+description: Master read and write transactions in Hive for atomic operations and data consistency
+---
+
+Transactions in Hive provide atomic, consistent, and isolated operations on your boxes. They ensure that multiple operations either all succeed or all fail together, maintaining data integrity.
+
+## Understanding transactions
+
+Hive 4.x provides two types of transactions:
+
+- **Read transactions** - Provide a consistent snapshot of the box for read operations
+- **Write transactions** - Allow atomic modifications to the box
+
+Both transaction types are implemented in `lib/src/box.dart:26` and `lib/src/box.dart:32`:
+
+```dart
+/// Start a read transaction on the box.
+///
+/// Transactions provides and atomic view on the box. All read operations
+/// inside the transaction will see the same state of the box.
+T read<T>(T Function() callback);
+
+/// Start a write transaction on the box.
+///
+/// Transactions provides and atomic view on the box. All read operations
+/// inside the transaction will see the same state of the box.
+T write<T>(T Function() callback);
+```
+
+<Note>
+Transactions in Hive 4.x are powered by Isar's transaction system, providing ACID guarantees (Atomicity, Consistency, Isolation, Durability).
+</Note>
+
+## Write transactions
+
+Write transactions ensure that multiple write operations are applied atomically:
+
+```dart
+final box = Hive.box();
+
+box.write(() {
+  box.put('nectar1', 'GoldenNectar');
+  box.put('nectar2', 'WildflowerBrew');
+  box.put('nectar3', 'CloverDew');
+});
+
+// All three values are written atomically
+```
+
+### Atomicity guarantees
+
+If any operation inside a write transaction fails, all changes are rolled back:
+
+```dart
+final box = Hive.box();
+box.put('honeyLevel', 5);
+
+try {
+  box.write(() {
+    box.put('honeyLevel', 6);
+    box.put('quality', 'premium');
+    throw Exception('Something went wrong!');
+  });
+} catch (e) {
+  print('Transaction failed: $e');
+}
+
+print(box.get('honeyLevel')); // 5 - unchanged
+print(box.get('quality'));     // null - never written
+```
+
+The transaction implementation in `lib/src/impl/box_impl.dart:46` shows how atomicity is achieved:
+
+```dart
+T write<T>(T Function() callback) {
+  if (writeTxn == null) {
+    return isar.write((isar) {
+      writeTxn = true;
+      try {
+        return callback();
+      } finally {
+        writeTxn = null;
+      }
+    });
+  } else if (writeTxn!) {
+    return callback();
+  } else {
+    throw StateError('Cannot write inside a read transaction.');
+  }
+}
+```
+
+<Tip>
+Use write transactions when you need to perform multiple related updates that should succeed or fail together. This is especially important for maintaining referential integrity.
+</Tip>
+
+## Read transactions
+
+Read transactions provide a consistent snapshot of the box, ensuring all read operations see the same state even if other isolates are writing:
+
+```dart
+final box = Hive.box();
+
+box.read(() {
+  final value1 = box.get('nectar1');
+  
+  // Even if another isolate modifies 'nectar2' here,
+  // we'll see the state from when the transaction started
+  final value2 = box.get('nectar2');
+  
+  return [value1, value2];
+});
+```
+
+### Consistency guarantees
+
+Read transactions ensure you see a consistent view of your data:
+
+```dart
+final box = Hive.box();
+
+// Main isolate - start a read transaction
+box.read(() {
+  final balance = box.get('balance') ?? 0;
+  
+  // Another isolate modifies the balance
+  Hive.compute(() {
+    final box = Hive.box();
+    box.put('balance', 500);
+  });
+  
+  // Still sees the original value within this transaction
+  final balanceAgain = box.get('balance');
+  assert(balance == balanceAgain);
+});
+```
+
+## Automatic transactions
+
+Many Hive operations automatically wrap themselves in transactions. For example, `put()`, `delete()`, and other write methods:
+
+```dart
+// The put() method internally uses a write transaction
+void put(String key, E value) {
+  write(() {  // Automatic transaction
+    final frame = Frame(
+      id: collection.autoIncrement(),
+      typeId: Hive._typeRegistry.findTypeId(value),
+      key: key,
+      value: value,
+    );
+    collection.put(frame);
+  });
+}
+```
+
+This means individual operations are always atomic:
+
+```dart
+final box = Hive.box();
+
+// These are automatically atomic
+box.put('key', 'value');
+box.delete('oldKey');
+box.putAll({'a': 1, 'b': 2});
+```
+
+<Note>
+Single operations like `put()`, `delete()`, `putAll()` automatically create transactions, so you don't need to wrap them explicitly.
+</Note>
+
+## Nested transactions
+
+Hive supports nested transactions. Inner transactions reuse the outer transaction:
+
+```dart
+final box = Hive.box();
+
+box.write(() {
+  box.put('a', 1);
+  
+  // Nested write - reuses outer transaction
+  box.write(() {
+    box.put('b', 2);
+  });
+  
+  box.put('c', 3);
+});
+
+// All three writes are part of the same atomic transaction
+```
+
+The implementation checks for existing transactions:
+
+```dart
+if (writeTxn == null) {
+  // Create new transaction
+  return isar.write((isar) {
+    writeTxn = true;
+    try {
+      return callback();
+    } finally {
+      writeTxn = null;
+    }
+  });
+} else if (writeTxn!) {
+  // Reuse existing write transaction
+  return callback();
+} else {
+  // Error - can't write in a read transaction
+  throw StateError('Cannot write inside a read transaction.');
+}
+```
+
+## Transaction rules
+
+### Cannot write in read transactions
+
+Attempting to write inside a read transaction throws an error:
+
+```dart
+final box = Hive.box();
+
+try {
+  box.read(() {
+    box.put('key', 'value'); // ❌ Error!
+  });
+} catch (e) {
+  print(e); // StateError: Cannot write inside a read transaction.
+}
+```
+
+### Can read in write transactions
+
+Reading inside write transactions is allowed and encouraged:
+
+```dart
+final box = Hive.box();
+
+box.write(() {
+  final current = box.get('counter') ?? 0; // ✅ OK
+  box.put('counter', current + 1);
+});
+```
+
+## Performance optimization
+
+### Batch operations
+
+Use transactions to batch multiple operations for better performance:
+
+```dart
+// ❌ Slow - creates 1000 separate transactions
+for (var i = 0; i < 1000; i++) {
+  box.put('key_$i', 'value_$i');
+}
+
+// ✅ Fast - single transaction for all operations
+box.write(() {
+  for (var i = 0; i < 1000; i++) {
+    box.put('key_$i', 'value_$i');
+  }
+});
+
+// ✅ Best - use putAll for bulk inserts
+box.write(() {
+  final entries = {
+    for (var i = 0; i < 1000; i++) 'key_$i': 'value_$i'
+  };
+  box.putAll(entries);
+});
+```
+
+<Tip>
+Batching operations in a single transaction can improve performance by 10-100x for bulk operations.
+</Tip>
+
+### Transaction overhead
+
+While transactions are fast, they do have overhead. For single operations, the automatic transaction is optimal:
+
+```dart
+// ✅ Good - automatic transaction is efficient
+box.put('key', 'value');
+
+// ❌ Unnecessary - adds no benefit
+box.write(() {
+  box.put('key', 'value');
+});
+
+// ✅ Good - explicit transaction for multiple operations
+box.write(() {
+  box.put('key1', 'value1');
+  box.put('key2', 'value2');
+  box.put('key3', 'value3');
+});
+```
+
+## Complex transaction patterns
+
+### Conditional updates
+
+Transactions ensure atomicity for conditional updates:
+
+```dart
+final box = Hive.box();
+
+bool transferBalance(String from, String to, int amount) {
+  return box.write(() {
+    final fromBalance = box.get(from) ?? 0;
+    
+    if (fromBalance < amount) {
+      return false; // Insufficient funds
+    }
+    
+    final toBalance = box.get(to) ?? 0;
+    
+    box.put(from, fromBalance - amount);
+    box.put(to, toBalance + amount);
+    
+    return true;
+  });
+}
+
+// Usage
+if (transferBalance('alice', 'bob', 50)) {
+  print('Transfer successful');
+} else {
+  print('Transfer failed');
+}
+```
+
+### Read-modify-write
+
+Safely update values based on their current state:
+
+```dart
+final box = Hive.box();
+
+void incrementCounter(String key) {
+  box.write(() {
+    final current = box.get(key) ?? 0;
+    box.put(key, current + 1);
+  });
+}
+
+void appendToList(String key, String item) {
+  box.write(() {
+    final list = box.get(key) ?? <String>[];
+    list.add(item);
+    box.put(key, list);
+  });
+}
+```
+
+### Bulk operations with validation
+
+```dart
+final box = Hive.box();
+
+void importData(Map<String, dynamic> data) {
+  box.write(() {
+    // Validate all data first
+    for (final entry in data.entries) {
+      if (!isValid(entry.value)) {
+        throw ArgumentError('Invalid data for ${entry.key}');
+      }
+    }
+    
+    // If validation passes, import everything
+    box.putAll(data);
+  });
+}
+```
+
+## Transactions across isolates
+
+Each isolate has independent transactions, but they coordinate through the underlying database:
+
+```dart
+// Main isolate
+final box = Hive.box();
+box.put('counter', 0);
+
+// Isolate 1
+await Hive.compute(() {
+  final box = Hive.box();
+  box.write(() {
+    final count = box.get('counter') ?? 0;
+    box.put('counter', count + 1);
+  });
+});
+
+// Isolate 2
+await Hive.compute(() {
+  final box = Hive.box();
+  box.write(() {
+    final count = box.get('counter') ?? 0;
+    box.put('counter', count + 1);
+  });
+});
+
+// Main isolate
+print(box.get('counter')); // 2
+```
+
+<Note>
+Transactions from different isolates are serialized by the database engine, ensuring consistency even with concurrent access.
+</Note>
+
+## Transaction isolation levels
+
+Hive uses snapshot isolation:
+
+- **Write transactions**: See all previously committed changes plus their own uncommitted changes
+- **Read transactions**: See a consistent snapshot from when the transaction started
+- **Isolation**: Transactions don't see uncommitted changes from other transactions
+
+```dart
+final box = Hive.box();
+box.put('value', 1);
+
+// Transaction 1 (read)
+box.read(() {
+  print(box.get('value')); // 1
+  
+  // Transaction 2 modifies the value
+  box.write(() {
+    box.put('value', 2);
+  });
+  
+  // Transaction 1 still sees the old value (snapshot isolation)
+  print(box.get('value')); // 1
+});
+
+// After both transactions complete
+print(box.get('value')); // 2
+```
+
+## Error handling
+
+### Handling transaction failures
+
+```dart
+final box = Hive.box();
+
+try {
+  box.write(() {
+    box.put('step1', 'complete');
+    box.put('step2', 'complete');
+    
+    if (someCondition) {
+      throw Exception('Operation failed');
+    }
+    
+    box.put('step3', 'complete');
+  });
+} catch (e) {
+  // All changes rolled back
+  print('Transaction failed: $e');
+  print(box.get('step1')); // null
+  print(box.get('step2')); // null
+  print(box.get('step3')); // null
+}
+```
+
+### Explicit rollback
+
+Throw an exception to explicitly roll back:
+
+```dart
+final box = Hive.box();
+
+void conditionalUpdate(String key, String value) {
+  box.write(() {
+    if (!validate(value)) {
+      throw ArgumentError('Invalid value');
+      // Transaction is rolled back
+    }
+    
+    box.put(key, value);
+  });
+}
+```
+
+## Best practices
+
+### 1. Keep transactions short
+
+```dart
+// ❌ Bad - transaction held too long
+box.write(() {
+  final data = box.get('data');
+  
+  // Heavy computation inside transaction
+  final processed = performExpensiveOperation(data);
+  
+  box.put('result', processed);
+});
+
+// ✅ Good - minimize transaction time
+final data = box.get('data');
+final processed = performExpensiveOperation(data);
+box.put('result', processed); // Automatic transaction
+```
+
+### 2. Use read transactions for consistency
+
+```dart
+// ❌ Risk - might see inconsistent state
+final balance = box.get('balance');
+final pending = box.get('pending');
+final total = balance + pending;
+
+// ✅ Good - guaranteed consistent snapshot
+final total = box.read(() {
+  final balance = box.get('balance') ?? 0;
+  final pending = box.get('pending') ?? 0;
+  return balance + pending;
+});
+```
+
+### 3. Batch related operations
+
+```dart
+// ❌ Less efficient
+box.put('user_name', 'Alice');
+box.put('user_email', 'alice@example.com');
+box.put('user_age', 30);
+
+// ✅ Better - single transaction
+box.write(() {
+  box.put('user_name', 'Alice');
+  box.put('user_email', 'alice@example.com');
+  box.put('user_age', 30);
+});
+
+// ✅ Best - use putAll
+box.putAll({
+  'user_name': 'Alice',
+  'user_email': 'alice@example.com',
+  'user_age': 30,
+});
+```
+
+### 4. Return values from transactions
+
+```dart
+// ✅ Good - return computed values
+final newBalance = box.write(() {
+  final current = box.get('balance') ?? 0;
+  final updated = current + 100;
+  box.put('balance', updated);
+  return updated;
+});
+
+print('New balance: $newBalance');
+```
+
+### 5. Avoid nested write transactions for different boxes
+
+```dart
+// ❌ Potential deadlock risk
+final box1 = Hive.box(name: 'box1');
+final box2 = Hive.box(name: 'box2');
+
+box1.write(() {
+  box2.write(() {
+    // Complex multi-box transaction
+  });
+});
+
+// ✅ Better - separate transactions
+box1.write(() {
+  // Update box1
+});
+
+box2.write(() {
+  // Update box2
+});
+```
+
+## Common patterns
+
+### Atomic counter
+
+```dart
+int increment(Box box, String key) {
+  return box.write(() {
+    final current = box.get(key) ?? 0;
+    final updated = current + 1;
+    box.put(key, updated);
+    return updated;
+  });
+}
+```
+
+### Unique key insertion
+
+```dart
+bool insertIfNotExists(Box box, String key, dynamic value) {
+  return box.write(() {
+    if (box.containsKey(key)) {
+      return false;
+    }
+    box.put(key, value);
+    return true;
+  });
+}
+```
+
+### Compare and swap
+
+```dart
+bool compareAndSwap(Box box, String key, dynamic expected, dynamic newValue) {
+  return box.write(() {
+    final current = box.get(key);
+    if (current != expected) {
+      return false;
+    }
+    box.put(key, newValue);
+    return true;
+  });
+}
+```
+
+### Multi-key update
+
+```dart
+void updateMultiple(Box box, Map<String, dynamic> updates) {
+  box.write(() {
+    for (final entry in updates.entries) {
+      final current = box.get(entry.key);
+      if (current != null) {
+        box.put(entry.key, entry.value);
+      }
+    }
+  });
+}
+```

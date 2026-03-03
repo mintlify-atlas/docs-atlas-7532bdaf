@@ -1,0 +1,587 @@
+---
+title: Performance optimization
+description: Tips and strategies for optimizing Hive performance, including maxSizeMiB configuration and best practices
+---
+
+Hive 4.x is built on Isar, providing excellent performance out of the box. However, understanding key performance characteristics and optimization strategies will help you get the most out of Hive.
+
+## Box size limits
+
+The `maxSizeMiB` parameter controls the maximum size of a box in mebibytes (MiB). This is defined in `lib/src/hive.dart:53`:
+
+```dart
+static Box<E> box<E>({
+  String name = defaultName,
+  String? directory,
+  String? encryptionKey,
+  int maxSizeMiB = 5,  // Default is 5 MiB
+})
+```
+
+<Warning>
+If your box exceeds `maxSizeMiB`, Hive will throw an exception. Set this value appropriately based on your expected data size.
+</Warning>
+
+### Choosing the right maxSizeMiB
+
+```dart
+// ❌ Too small - may hit limits quickly
+final box = Hive.box(maxSizeMiB: 1);
+
+// ✅ Good for small datasets (settings, preferences)
+final settingsBox = Hive.box(
+  name: 'settings',
+  maxSizeMiB: 5, // Default
+);
+
+// ✅ Good for medium datasets (cached data)
+final cacheBox = Hive.box(
+  name: 'cache',
+  maxSizeMiB: 50,
+);
+
+// ✅ Good for large datasets (offline data)
+final dataBox = Hive.box(
+  name: 'offlineData',
+  maxSizeMiB: 512,
+);
+
+// ⚠️ Very large - ensure device has space
+final largeBox = Hive.box(
+  name: 'media',
+  maxSizeMiB: 2048, // 2 GiB
+);
+```
+
+<Tip>
+Start with a conservative estimate and increase `maxSizeMiB` as needed. Monitor your box size in production to determine appropriate limits.
+</Tip>
+
+### Monitoring box size
+
+```dart
+import 'dart:io';
+
+int getBoxSizeInBytes(Box box) {
+  final file = File('${box.directory}/${box.name}.isar');
+  return file.existsSync() ? file.lengthSync() : 0;
+}
+
+String formatBytes(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(2)} KiB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MiB';
+}
+
+// Usage
+final box = Hive.box();
+final size = getBoxSizeInBytes(box);
+print('Box size: ${formatBytes(size)}');
+
+if (size > 4 * 1024 * 1024) {
+  print('Warning: Box is approaching size limit');
+}
+```
+
+## Batch operations
+
+Batch operations are significantly faster than individual operations:
+
+```dart
+import 'dart:io';
+
+void demonstrateBatching() {
+  final box = Hive.box();
+  final data = List.generate(1000, (i) => 'value_$i');
+  
+  // ❌ Slow - 1000 separate transactions
+  final sw1 = Stopwatch()..start();
+  for (var i = 0; i < 1000; i++) {
+    box.put('key_$i', data[i]);
+  }
+  print('Individual puts: ${sw1.elapsedMilliseconds}ms');
+  
+  box.clear();
+  
+  // ✅ Fast - single transaction
+  final sw2 = Stopwatch()..start();
+  box.write(() {
+    for (var i = 0; i < 1000; i++) {
+      box.put('key_$i', data[i]);
+    }
+  });
+  print('Batched puts: ${sw2.elapsedMilliseconds}ms');
+  
+  box.clear();
+  
+  // ✅ Fastest - optimized bulk operation
+  final sw3 = Stopwatch()..start();
+  box.putAll({
+    for (var i = 0; i < 1000; i++) 'key_$i': data[i]
+  });
+  print('putAll: ${sw3.elapsedMilliseconds}ms');
+}
+
+// Typical results:
+// Individual puts: 500ms
+// Batched puts: 50ms (10x faster)
+// putAll: 30ms (16x faster)
+```
+
+<Note>
+Batch operations can be 10-100x faster than individual operations. Always use `putAll()`, `addAll()`, `deleteAll()`, or wrap operations in `write()` transactions.
+</Note>
+
+## Transaction optimization
+
+### Keep transactions short
+
+Transactions lock the database. Keep them as short as possible:
+
+```dart
+// ❌ Bad - heavy computation inside transaction
+box.write(() {
+  final data = box.get('data');
+  
+  // Heavy processing while holding transaction lock
+  final processed = expensiveOperation(data); // 500ms
+  
+  box.put('result', processed);
+});
+
+// ✅ Good - minimize transaction time
+final data = box.get('data');
+final processed = expensiveOperation(data); // 500ms
+box.put('result', processed); // Fast
+```
+
+### Prefer read transactions for read-only operations
+
+```dart
+// ❌ Unnecessary write transaction overhead
+final result = box.write(() {
+  return box.get('key'); // Just reading
+});
+
+// ✅ Good - use read transaction
+final result = box.read(() {
+  return box.get('key');
+});
+
+// ✅ Best - no transaction needed for single read
+final result = box.get('key');
+```
+
+## Data structure optimization
+
+### Store appropriate data types
+
+```dart
+// ❌ Inefficient - strings for numbers
+box.put('count', '12345');
+box.put('price', '99.99');
+
+// ✅ Efficient - native types
+box.put('count', 12345);
+box.put('price', 99.99);
+
+// ❌ Inefficient - JSON strings
+box.put('user', '{"name": "Alice", "age": 30}');
+
+// ✅ Efficient - structured maps
+box.put('user', {'name': 'Alice', 'age': 30});
+
+// ✅ Best - custom objects with type adapters
+box.put('user', User(name: 'Alice', age: 30));
+```
+
+### Avoid storing large binary data
+
+```dart
+// ❌ Bad - large images in Hive
+final imageBytes = await file.readAsBytes(); // 5 MB
+box.put('profile_image', imageBytes);
+
+// ✅ Good - store file path instead
+final imagePath = file.path;
+box.put('profile_image_path', imagePath);
+
+// Load image when needed
+final path = box.get('profile_image_path');
+final image = File(path);
+```
+
+<Warning>
+Store large binary data (images, videos, documents) as files on disk. Store only file paths in Hive. This keeps your boxes small and operations fast.
+</Warning>
+
+## Query optimization
+
+### Use efficient key access
+
+```dart
+final box = Hive.box();
+
+// ✅ Fast - direct key access (O(log n))
+final value = box.get('specific_key');
+
+// ⚠️ Slower - iteration (O(n))
+for (final key in box.keys) {
+  if (key.startsWith('user_')) {
+    print(box.get(key));
+  }
+}
+
+// ✅ Better - use key naming conventions
+// Store related items with consistent key prefixes
+box.putAll({
+  'user_1': userData1,
+  'user_2': userData2,
+  'user_3': userData3,
+});
+
+// Then use getBetween for range queries
+final users = box.getBetween(
+  startKey: 'user_',
+  endKey: 'user_\uffff',
+);
+```
+
+### Minimize full box scans
+
+```dart
+// ❌ Slow - scanning all keys
+final allKeys = box.keys; // Loads all keys
+final filteredKeys = allKeys.where((k) => k.contains('active')).toList();
+
+// ✅ Better - use structured keys
+// Use prefixes for filtering
+final activeItems = box.getBetween(
+  startKey: 'active_',
+  endKey: 'active_\uffff',
+);
+```
+
+## Memory optimization
+
+### Avoid loading all data at once
+
+```dart
+// ❌ Bad - loads everything into memory
+final allValues = box.keys.map((key) => box.get(key)).toList();
+
+// ✅ Good - process incrementally
+void processAllItems() {
+  final keys = box.keys;
+  for (final key in keys) {
+    final value = box.get(key);
+    processItem(value);
+    // Value can be garbage collected after processing
+  }
+}
+
+// ✅ Good - process ranges
+void processInBatches() {
+  const batchSize = 100;
+  final totalItems = box.length;
+  
+  for (var i = 0; i < totalItems; i += batchSize) {
+    final batch = box.getRange(i, min(i + batchSize, totalItems));
+    processBatch(batch);
+    // Batch can be garbage collected
+  }
+}
+```
+
+### Use appropriate box scope
+
+```dart
+// ❌ Bad - keeping boxes open unnecessarily
+class MyService {
+  final Box box = Hive.box(name: 'data');
+  
+  void someMethod() {
+    // Box stays open as long as service exists
+  }
+}
+
+// ✅ Good - open box when needed
+class MyService {
+  void someMethod() {
+    final box = Hive.box(name: 'data');
+    final value = box.get('key');
+    // Box can be closed later if needed
+  }
+}
+```
+
+<Note>
+Hive uses a singleton pattern - calling `Hive.box()` multiple times returns the same instance. There's no overhead to calling it repeatedly.
+</Note>
+
+## Multi-isolate performance
+
+### Use isolates for heavy operations
+
+```dart
+// ❌ Bad - heavy operation blocks UI
+final box = Hive.box();
+for (var i = 0; i < 10000; i++) {
+  box.put('item_$i', generateComplexObject());
+}
+// UI is frozen during this operation
+
+// ✅ Good - offload to background isolate
+await Hive.compute(() {
+  final box = Hive.box();
+  box.write(() {
+    for (var i = 0; i < 10000; i++) {
+      box.put('item_$i', generateComplexObject());
+    }
+  });
+});
+// UI remains responsive
+```
+
+### Minimize isolate spawning
+
+```dart
+// ❌ Inefficient - spawning isolates for small tasks
+for (var i = 0; i < 100; i++) {
+  await Hive.compute(() {
+    final box = Hive.box();
+    box.put('key_$i', 'value_$i');
+  });
+}
+
+// ✅ Efficient - batch work in single isolate
+await Hive.compute(() {
+  final box = Hive.box();
+  box.write(() {
+    for (var i = 0; i < 100; i++) {
+      box.put('key_$i', 'value_$i');
+    }
+  });
+});
+```
+
+## Storage optimization
+
+### Delete unused data
+
+```dart
+// Regularly clean up old data
+void cleanupOldCache() {
+  final box = Hive.box(name: 'cache');
+  final now = DateTime.now();
+  final keysToDelete = <String>[];
+  
+  for (final key in box.keys) {
+    final item = box.get(key);
+    if (item['timestamp'] != null) {
+      final timestamp = DateTime.parse(item['timestamp']);
+      if (now.difference(timestamp).inDays > 30) {
+        keysToDelete.add(key);
+      }
+    }
+  }
+  
+  box.deleteAll(keysToDelete);
+  print('Deleted ${keysToDelete.length} old items');
+}
+```
+
+### Use appropriate box granularity
+
+```dart
+// ❌ Bad - one box for everything
+final box = Hive.box(name: 'data');
+box.put('user_profile', userData);
+box.put('cache_item_1', cacheData1);
+box.put('settings_theme', 'dark');
+
+// ✅ Good - separate boxes by purpose
+final userBox = Hive.box(name: 'user');
+final cacheBox = Hive.box(name: 'cache', maxSizeMiB: 50);
+final settingsBox = Hive.box(name: 'settings', maxSizeMiB: 1);
+
+userBox.put('profile', userData);
+cacheBox.put('item_1', cacheData1);
+settingsBox.put('theme', 'dark');
+
+// Can clear cache without affecting other data
+cacheBox.clear();
+```
+
+<Tip>
+Use separate boxes for different data categories. This allows selective clearing, different size limits, and better organization.
+</Tip>
+
+## Encryption performance
+
+Encryption adds minimal overhead:
+
+```dart
+void compareEncryption() {
+  final plainBox = Hive.box(name: 'plain');
+  final encryptedBox = Hive.box(
+    name: 'encrypted',
+    encryptionKey: 'my-encryption-key',
+  );
+  
+  final data = List.generate(1000, (i) => 'value_$i');
+  
+  // Plain box
+  final sw1 = Stopwatch()..start();
+  plainBox.putAll({
+    for (var i = 0; i < 1000; i++) 'key_$i': data[i]
+  });
+  print('Plain: ${sw1.elapsedMilliseconds}ms');
+  
+  // Encrypted box
+  final sw2 = Stopwatch()..start();
+  encryptedBox.putAll({
+    for (var i = 0; i < 1000; i++) 'key_$i': data[i]
+  });
+  print('Encrypted: ${sw2.elapsedMilliseconds}ms');
+  
+  // Typical overhead: 5-15%
+}
+```
+
+<Note>
+Encryption overhead is typically 5-15% for write operations and negligible for read operations. Use encryption for sensitive data without worrying about performance.
+</Note>
+
+## Benchmarking your code
+
+```dart
+class HiveBenchmark {
+  static void run() {
+    print('=== Hive Performance Benchmark ===\n');
+    
+    _benchmarkWrites();
+    _benchmarkReads();
+    _benchmarkDeletes();
+    _benchmarkBulkOperations();
+  }
+  
+  static void _benchmarkWrites() {
+    print('Write Performance:');
+    final box = Hive.box(name: 'benchmark_writes');
+    box.clear();
+    
+    final sw = Stopwatch()..start();
+    box.write(() {
+      for (var i = 0; i < 10000; i++) {
+        box.put('key_$i', 'value_$i');
+      }
+    });
+    sw.stop();
+    
+    print('  10,000 writes: ${sw.elapsedMilliseconds}ms');
+    print('  ${(10000 / sw.elapsedMilliseconds * 1000).toStringAsFixed(0)} writes/sec\n');
+  }
+  
+  static void _benchmarkReads() {
+    print('Read Performance:');
+    final box = Hive.box(name: 'benchmark_writes');
+    
+    final sw = Stopwatch()..start();
+    for (var i = 0; i < 10000; i++) {
+      box.get('key_$i');
+    }
+    sw.stop();
+    
+    print('  10,000 reads: ${sw.elapsedMilliseconds}ms');
+    print('  ${(10000 / sw.elapsedMilliseconds * 1000).toStringAsFixed(0)} reads/sec\n');
+  }
+  
+  static void _benchmarkDeletes() {
+    print('Delete Performance:');
+    final box = Hive.box(name: 'benchmark_deletes');
+    box.clear();
+    
+    // Setup
+    box.putAll({
+      for (var i = 0; i < 10000; i++) 'key_$i': 'value_$i'
+    });
+    
+    final sw = Stopwatch()..start();
+    box.write(() {
+      for (var i = 0; i < 10000; i++) {
+        box.delete('key_$i');
+      }
+    });
+    sw.stop();
+    
+    print('  10,000 deletes: ${sw.elapsedMilliseconds}ms');
+    print('  ${(10000 / sw.elapsedMilliseconds * 1000).toStringAsFixed(0)} deletes/sec\n');
+  }
+  
+  static void _benchmarkBulkOperations() {
+    print('Bulk Operations:');
+    final box = Hive.box(name: 'benchmark_bulk');
+    box.clear();
+    
+    final data = {
+      for (var i = 0; i < 10000; i++) 'key_$i': 'value_$i'
+    };
+    
+    final sw = Stopwatch()..start();
+    box.putAll(data);
+    sw.stop();
+    
+    print('  putAll (10,000): ${sw.elapsedMilliseconds}ms\n');
+  }
+}
+
+// Run benchmarks
+void main() {
+  Hive.defaultDirectory = '/tmp/hive_benchmark';
+  HiveBenchmark.run();
+}
+```
+
+## Performance checklist
+
+Use this checklist to ensure optimal performance:
+
+- [ ] Set appropriate `maxSizeMiB` based on expected data size
+- [ ] Use batch operations (`putAll`, `deleteAll`, `addAll`) instead of loops
+- [ ] Wrap multiple operations in `write()` transactions
+- [ ] Store file paths instead of large binary data
+- [ ] Use structured keys for efficient range queries
+- [ ] Separate boxes by data category and lifecycle
+- [ ] Use `Hive.compute()` for heavy operations
+- [ ] Regularly clean up old or unused data
+- [ ] Monitor box sizes in production
+- [ ] Use read transactions for read-only operations
+- [ ] Keep transactions short and focused
+- [ ] Profile your specific use case with benchmarks
+
+## Platform-specific considerations
+
+### Mobile (iOS/Android)
+
+- Storage is limited - be conservative with `maxSizeMiB`
+- Use background isolates to avoid blocking UI
+- Consider network conditions for sync operations
+- Clean up cache data regularly
+
+### Desktop (Windows/macOS/Linux)
+
+- More storage available - can use larger `maxSizeMiB`
+- Still use isolates for heavy operations
+- Consider multi-window access patterns
+
+### Web
+
+- Storage quota varies by browser
+- Persistence is not guaranteed
+- Consider using compression for larger datasets
+- Use smaller `maxSizeMiB` values
+
+<Tip>
+Test performance on real devices and with realistic data sizes. Emulators and simulators may not accurately reflect production performance.
+</Tip>

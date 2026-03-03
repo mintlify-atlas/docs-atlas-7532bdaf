@@ -1,80 +1,450 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Build your first Hive app and learn the basics in under 5 minutes
 ---
 
-## Get started in three steps
+# Quickstart
 
-Get your documentation site running locally and make your first customization.
+Get hands-on with Hive by building a simple app that stores and retrieves data. This tutorial covers the essential operations you'll use in every Hive project.
 
-### Step 1: Set up your local environment
+<Note>
+  Make sure you've completed the [installation](/installation) steps before starting this tutorial.
+</Note>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Your first Hive app
+
+Let's create a simple Flutter app that demonstrates Hive's core functionality.
+
+<Steps>
+  <Step title="Set up your project">
+    Create a new Flutter project and add the required dependencies:
+
+    ```yaml pubspec.yaml
+    dependencies:
+      flutter:
+        sdk: flutter
+      hive: ^4.0.0
+      isar_flutter_libs: ^4.0.0-dev.13
+      path_provider: ^2.1.0
+    ```
+
+    Run `flutter pub get` to install the packages.
+  </Step>
+
+  <Step title="Initialize Hive">
+    Update your `main.dart` to initialize Hive:
+
+    ```dart main.dart
+    import 'package:flutter/material.dart';
+    import 'package:hive/hive.dart';
+    import 'package:path_provider/path_provider.dart';
+
+    void main() async {
+      // Initialize Flutter bindings
+      WidgetsFlutterBinding.ensureInitialized();
+      
+      // Set Hive's storage directory
+      final dir = await getApplicationDocumentsDirectory();
+      Hive.defaultDirectory = dir.path;
+
+      runApp(MyApp());
+    }
+    ```
+  </Step>
+
+  <Step title="Open a box">
+    Open your first box and start storing data:
+
+    ```dart
+    // Open the default box
+    final box = Hive.box();
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    // Or open a named box
+    final userBox = Hive.box(name: 'users');
+    ```
+
+    <Note>
+      Boxes are automatically created the first time you open them. If you call `Hive.box()` with the same name multiple times, Hive returns the existing box instance.
+    </Note>
+  </Step>
+
+  <Step title="Store data">
+    Use the `put()` method to store key-value pairs:
+
+    ```dart
+    final box = Hive.box();
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    // Store simple values
+    box.put('name', 'Alice');
+    box.put('age', 28);
+    box.put('score', 1000);
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    // Store complex types
+    box.put('friends', ['Bob', 'Charlie', 'Diana']);
+    box.put('settings', {
+      'theme': 'dark',
+      'notifications': true,
+    });
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    You can also use the map-style syntax:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```dart
+    box['name'] = 'Alice';
+    box['age'] = 28;
+    ```
+  </Step>
 
-### Step 3: Go live
+  <Step title="Retrieve data">
+    Use the `get()` method to retrieve values:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```dart
+    final box = Hive.box();
+    
+    final name = box.get('name');
+    print('Name: $name'); // Name: Alice
+    
+    // With a default value
+    final color = box.get('color', defaultValue: 'blue');
+    print('Color: $color'); // Color: blue
+    
+    // Or use the bracket operator
+    final age = box['age'];
+    print('Age: $age'); // Age: 28
+    ```
+  </Step>
+</Steps>
+
+## Complete example
+
+Here's a complete working app that demonstrates CRUD operations:
+
+```dart main.dart
+import 'package:flutter/material.dart';
+import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Hive Demo',
+      theme: ThemeData(primarySwatch: Colors.amber),
+      home: TodoListPage(),
+    );
+  }
+}
+
+class TodoListPage extends StatefulWidget {
+  @override
+  _TodoListPageState createState() => _TodoListPageState();
+}
+
+class _TodoListPageState extends State<TodoListPage> {
+  late Box box;
+  final _controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Open a box for todos
+    box = Hive.box(name: 'todos');
+  }
+
+  void _addTodo() {
+    if (_controller.text.isNotEmpty) {
+      // Add with auto-increment key
+      box.add(_controller.text);
+      _controller.clear();
+      setState(() {});
+    }
+  }
+
+  void _deleteTodo(int index) {
+    box.deleteAt(index);
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Hive Todo List'),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    decoration: InputDecoration(
+                      hintText: 'Enter a todo',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _addTodo(),
+                  ),
+                ),
+                SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _addTodo,
+                  child: Text('Add'),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: box.length,
+              itemBuilder: (context, index) {
+                final todo = box.getAt(index);
+                return ListTile(
+                  title: Text(todo),
+                  trailing: IconButton(
+                    icon: Icon(Icons.delete),
+                    onPressed: () => _deleteTodo(index),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    // Don't close the box here - it might be used elsewhere
+    super.dispose();
+  }
+}
+```
+
+## Core concepts
+
+### Opening boxes
+
+Boxes are the fundamental storage containers in Hive. Open them with `Hive.box()`:
+
+```dart
+// Default box
+final box = Hive.box();
+
+// Named box
+final settings = Hive.box(name: 'settings');
+
+// Type-safe box
+final scores = Hive.box<int>(name: 'scores');
+
+// Encrypted box
+final secure = Hive.box(
+  name: 'secrets',
+  encryptionKey: 'your-encryption-key',
+);
+```
+
+### Storing data
+
+Store data using `put()`, `add()`, or the bracket operator:
+
+<CodeGroup>
+```dart put() - Named keys
+// Store with specific keys
+box.put('username', 'alice');
+box.put('level', 5);
+
+// Update existing values
+box.put('level', 6); // Overwrites the previous value
+```
+
+```dart add() - Auto-increment
+// Store with auto-generated keys
+box.add('First item');
+box.add('Second item');
+box.add('Third item');
+
+// Access by index
+print(box.getAt(0)); // First item
+print(box.getAt(1)); // Second item
+```
+
+```dart putAll() - Batch insert
+// Store multiple entries at once
+box.putAll({
+  'firstName': 'Alice',
+  'lastName': 'Johnson',
+  'email': 'alice@example.com',
+});
+```
+</CodeGroup>
+
+### Retrieving data
+
+Retrieve data using `get()`, `getAt()`, or the bracket operator:
+
+<CodeGroup>
+```dart get() - By key
+// Get by key
+final username = box.get('username');
+
+// With default value
+final theme = box.get('theme', defaultValue: 'light');
+
+// Returns null if key doesn't exist
+final missing = box.get('nonexistent'); // null
+```
+
+```dart getAt() - By index
+// Get by index
+final first = box.getAt(0);
+final second = box.getAt(1);
+
+// Get multiple values
+final items = box.getRange(0, 5);
+```
+
+```dart getAll() - Multiple keys
+// Get multiple values at once
+final values = box.getAll(['name', 'email', 'age']);
+// Returns [nameValue, emailValue, ageValue]
+```
+</CodeGroup>
+
+### Deleting data
+
+Remove data using `delete()`, `deleteAt()`, or `clear()`:
+
+```dart
+// Delete specific key
+final deleted = box.delete('username');
+print(deleted); // true if key existed
+
+// Delete by index
+box.deleteAt(0);
+
+// Delete multiple keys
+box.deleteAll(['key1', 'key2', 'key3']);
+
+// Clear all data
+box.clear();
+```
+
+## List-style access
+
+Use boxes like lists with auto-increment keys:
+
+```dart
+final box = Hive.box();
+
+// Add items
+box.add('Apple');
+box.add('Banana');
+box.add('Cherry');
+
+// Access by index
+print(box[0]); // Apple
+print(box.getAt(1)); // Banana
+
+// Update by index
+box[0] = 'Apricot';
+
+// Get length
+print(box.length); // 3
+
+// Iterate
+for (var i = 0; i < box.length; i++) {
+  print(box.getAt(i));
+}
+```
+
+## Type safety
+
+Use generic type parameters to ensure type safety:
+
+```dart
+// String-only box
+final strings = Hive.box<String>(name: 'strings');
+strings.put('greeting', 'Hello');
+strings.put('farewell', 'Goodbye');
+// strings.put('count', 42); // Compile error!
+
+// Integer-only box
+final scores = Hive.box<int>(name: 'scores');
+scores.put('level1', 1000);
+scores.put('level2', 2500);
+// scores.put('name', 'Alice'); // Compile error!
+```
+
+<Warning>
+  Always use the same type parameter when accessing a box. Calling `Hive.box<String>(name: 'myBox')` then `Hive.box<int>(name: 'myBox')` will throw an error.
+</Warning>
+
+## Working with transactions
+
+Group multiple operations into atomic transactions:
+
+```dart
+final box = Hive.box();
+
+// Write transaction
+box.write(() {
+  box.put('gold', 100);
+  box.put('silver', 250);
+  box.put('bronze', 500);
+});
+
+// Read transaction
+box.read(() {
+  final gold = box.get('gold');
+  final silver = box.get('silver');
+  return gold + silver;
+});
+```
+
+Transactions are atomic — either all changes succeed or none do:
+
+```dart
+box.put('coins', 100);
+
+try {
+  box.write(() {
+    box.put('coins', 200);
+    throw Exception('Error!');
+  });
+} catch (e) {
+  // Transaction rolled back
+  print(box.get('coins')); // Still 100
+}
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
+Now that you understand the basics, explore more advanced features:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Opening boxes" icon="box" href="/guides/opening-boxes">
+    Learn about box configuration, encryption, and lifecycle
+  </Card>
+  <Card title="Storing data" icon="database" href="/guides/writing-data">
+    Master all CRUD operations and data manipulation
+  </Card>
+  <Card title="Custom objects" icon="cube" href="/guides/custom-objects">
+    Store your own Dart classes in Hive
+  </Card>
+  <Card title="Isolates" icon="gears" href="/advanced/multi-isolate">
+    Use Hive from multiple isolates for background processing
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

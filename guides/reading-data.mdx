@@ -1,0 +1,285 @@
+---
+title: Reading data
+description: Learn how to retrieve data from Hive boxes using get(), getAt(), getAll(), and operators
+---
+
+Hive provides multiple ways to read data from your boxes, whether you're accessing single values, multiple entries, or using index-based retrieval.
+
+## Reading single values
+
+The most common way to retrieve data is using the `get()` method with a key:
+
+```dart
+final box = Hive.box(name: 'myBox');
+final value = box.get('username');
+print('Username: $value');
+```
+
+If the key doesn't exist, `get()` returns `null`.
+
+## Using default values
+
+Provide a fallback value when a key might not exist:
+
+```dart
+final theme = box.get('theme', defaultValue: 'light');
+final count = box.get('loginCount', defaultValue: 0);
+```
+
+## The bracket operator
+
+For a more concise syntax, use the `[]` operator:
+
+```dart
+final username = box['username'];
+final email = box['email'] ?? 'no-email@example.com';
+```
+
+The bracket operator works identically to `get()`, returning `null` if the key doesn't exist.
+
+## Reading by index
+
+Boxes maintain insertion order, allowing you to access values by their position using `getAt()`:
+
+```dart
+final box = Hive.box();
+
+box.put('first', 'Rose');
+box.put('second', 'Tulip');
+
+print(box.getAt(0)); // Rose
+print(box.getAt(1)); // Tulip
+```
+
+<Warning>
+  Index-based operations will throw an error if you try to access an index that's out of bounds. Always check the box length first or use try-catch blocks.
+</Warning>
+
+### Safe index access
+
+```dart
+if (index >= 0 && index < box.length) {
+  final value = box.getAt(index);
+  print(value);
+} else {
+  print('Index out of bounds');
+}
+```
+
+## Reading multiple values
+
+Retrieve multiple entries at once using `getAll()`:
+
+```dart
+final keys = ['username', 'email', 'theme'];
+final values = box.getAll(keys);
+
+for (var i = 0; i < keys.length; i++) {
+  print('${keys[i]}: ${values[i]}');
+}
+```
+
+<Note>
+  `getAll()` returns a list where each element corresponds to the key at the same index. If a key doesn't exist, the corresponding value in the list will be `null`.
+</Note>
+
+## Reading ranges
+
+<Tabs>
+  <Tab title="By index">
+    Use `getRange()` to retrieve consecutive values by their indices:
+
+    ```dart
+    final box = Hive.box();
+    box.add('Apple');
+    box.add('Banana');
+    box.add('Cherry');
+    box.add('Date');
+
+    final fruits = box.getRange(1, 3);
+    print(fruits); // [Banana, Cherry]
+    ```
+
+    The `end` index is exclusive, similar to Dart's list slicing.
+  </Tab>
+
+  <Tab title="By key">
+    Use `getBetween()` to retrieve values within a key range:
+
+    ```dart
+    final values = box.getBetween(
+      startKey: 'user_100',
+      endKey: 'user_200',
+    );
+    ```
+
+    Both `startKey` and `endKey` are inclusive. You can omit either parameter to read from the beginning or to the end:
+
+    ```dart
+    // From start to endKey
+    final firstHalf = box.getBetween(endKey: 'middle');
+
+    // From startKey to end
+    final secondHalf = box.getBetween(startKey: 'middle');
+    ```
+  </Tab>
+</Tabs>
+
+## Checking for key existence
+
+Before reading, you can check if a key exists:
+
+```dart
+if (box.containsKey('username')) {
+  final username = box.get('username');
+  print('Welcome back, $username!');
+} else {
+  print('Please set your username');
+}
+```
+
+## Working with keys
+
+Retrieve all keys in a box:
+
+```dart
+final allKeys = box.keys;
+print('Total keys: ${allKeys.length}');
+
+for (final key in allKeys) {
+  print('$key: ${box.get(key)}');
+}
+```
+
+Get a specific key by its index:
+
+```dart
+final firstKey = box.keyAt(0);
+final lastKey = box.keyAt(box.length - 1);
+```
+
+## Reading with type safety
+
+When using typed boxes, all read operations return values of the specified type:
+
+```dart
+final box = Hive.box<String>(name: 'strings');
+
+// Returns String?
+final value = box.get('key');
+
+// Returns String (non-nullable)
+final valueAt = box.getAt(0);
+
+// Returns List<String?>
+final values = box.getAll(['key1', 'key2']);
+```
+
+## Mixed key-index access
+
+You can mix key-based and index-based access:
+
+```dart
+final box = Hive.box();
+
+box.put('greeting', 'Hello');
+box.add('World');
+
+print(box['greeting']);  // Hello
+print(box[0]);           // Hello (same as getAt(0))
+print(box[1]);           // World
+```
+
+The `[]` operator accepts both `String` keys and `int` indices.
+
+## Handling complex types
+
+When reading custom objects, Hive automatically deserializes them:
+
+```dart
+class User {
+  final String name;
+  final int age;
+
+  User({required this.name, required this.age});
+
+  factory User.fromJson(Map<String, dynamic> json) => User(
+    name: json['name'] as String,
+    age: json['age'] as int,
+  );
+
+  Map<String, dynamic> toJson() => {'name': name, 'age': age};
+}
+
+// Register the adapter
+Hive.registerAdapter('User', User.fromJson);
+
+// Read the object
+final box = Hive.box();
+final user = box.get('currentUser') as User?;
+
+if (user != null) {
+  print('${user.name}, ${user.age} years old');
+}
+```
+
+## Performance tips
+
+<Steps>
+  <Step title="Use getAll() for bulk reads">
+    When reading multiple values, use `getAll()` instead of multiple `get()` calls:
+
+    ```dart
+    // Good
+    final values = box.getAll(['key1', 'key2', 'key3']);
+
+    // Less efficient
+    final value1 = box.get('key1');
+    final value2 = box.get('key2');
+    final value3 = box.get('key3');
+    ```
+  </Step>
+
+  <Step title="Cache frequently accessed keys">
+    If you're repeatedly reading the same keys, consider caching them:
+
+    ```dart
+    final username = box.get('username');
+    // Use username multiple times without re-reading
+    ```
+  </Step>
+
+  <Step title="Use read transactions">
+    For consistent views across multiple reads:
+
+    ```dart
+    final results = box.read(() {
+      final user = box.get('user');
+      final settings = box.get('settings');
+      return {'user': user, 'settings': settings};
+    });
+    ```
+  </Step>
+</Steps>
+
+## Error handling
+
+Handle potential errors when reading data:
+
+```dart
+try {
+  final value = box.getAt(10);
+  print(value);
+} catch (e) {
+  if (e is RangeError) {
+    print('Index out of bounds');
+  } else {
+    print('Error reading data: $e');
+  }
+}
+```
+
+Common issues:
+- Accessing indices beyond `box.length`
+- Reading from a closed box
+- Type mismatches when using typed boxes

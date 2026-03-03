@@ -1,0 +1,220 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for Hive database
+---
+
+This guide covers common issues you might encounter when working with Hive and how to resolve them.
+
+## Setup issues
+
+### Missing default directory
+
+If you see an error about missing directory when opening a box, make sure you've set the default directory before accessing any boxes:
+
+```dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final dir = await getApplicationDocumentsDirectory();
+  Hive.defaultDirectory = dir.path;
+  
+  runApp(MyApp());
+}
+```
+
+<Note>
+The `path_provider` package is required to find the appropriate directory for each platform.
+</Note>
+
+### Dependency conflicts
+
+If you encounter dependency conflicts during installation, ensure you're using compatible versions:
+
+```yaml
+dependencies:
+  hive: ^4.0.0
+  isar_flutter_libs: ^4.0.0-dev.13
+  path_provider: ^2.1.0
+```
+
+<Warning>
+Hive 4.0.0 is not compatible with older versions. You'll need to migrate your existing boxes if upgrading from previous versions.
+</Warning>
+
+## Platform-specific problems
+
+### Web platform issues
+
+On web, Hive uses IndexedDB for storage. If you're experiencing issues:
+
+1. Check that your browser supports IndexedDB
+2. Clear your browser's IndexedDB storage if data appears corrupted
+3. Ensure you're not exceeding browser storage quotas
+
+### iOS file access
+
+On iOS, make sure your app has proper file access permissions. Use `getApplicationDocumentsDirectory()` from `path_provider` to get a valid directory:
+
+```dart
+import 'package:path_provider/path_provider.dart';
+
+final dir = await getApplicationDocumentsDirectory();
+Hive.defaultDirectory = dir.path;
+```
+
+### Android storage permissions
+
+For Android, you don't need special permissions to access the app's documents directory. However, if you're trying to use external storage, add the appropriate permissions to your `AndroidManifest.xml`.
+
+## Data migration issues
+
+### Migrating from Hive 3.x to 4.x
+
+<Warning>
+Hive 4.0.0 is a complete rewrite and is not directly compatible with Hive 3.x boxes.
+</Warning>
+
+To migrate your data:
+
+1. Read all data from your Hive 3.x boxes
+2. Upgrade to Hive 4.0.0
+3. Write the data back to new Hive 4.0.0 boxes
+
+```dart
+// Before migration (Hive 3.x)
+final oldBox = await Hive.openBox('myBox');
+final allData = Map.from(oldBox.toMap());
+
+// After upgrading to Hive 4.0.0
+final newBox = Hive.box(name: 'myBox');
+for (final entry in allData.entries) {
+  newBox.put(entry.key, entry.value);
+}
+```
+
+### Type adapter issues
+
+If you used custom type adapters in Hive 3.x, you'll need to update them for Hive 4.0.0:
+
+- Remove code generation dependencies
+- Implement `fromJson` and `toJson` methods instead
+- Re-register adapters using the new API
+
+```dart
+// Hive 4.0.0 approach
+class Bee {
+  Bee({required this.name, required this.role});
+
+  factory Bee.fromJson(Map<String, dynamic> json) => Bee(
+    name: json['name'] as String,
+    role: json['role'] as String,
+  );
+
+  final String name;
+  final String role;
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'role': role,
+  };
+}
+
+Hive.registerAdapter('Bee', Bee.fromJson);
+```
+
+## Performance troubleshooting
+
+### Slow box opening
+
+If opening a box takes too long:
+
+1. Check the size of your box - very large boxes take longer to open
+2. Consider splitting data across multiple smaller boxes
+3. Ensure you're not performing heavy operations during box initialization
+
+<Note>
+Hive 4.0.0 has vastly reduced startup time compared to previous versions.
+</Note>
+
+### Memory usage concerns
+
+If your app is using too much memory:
+
+1. Avoid storing large binary data (images, videos) directly in Hive
+2. Store file paths instead of the files themselves
+3. Consider using transactions for bulk operations
+4. Close boxes that are no longer needed
+
+### Concurrent access issues
+
+Hive 4.0.0 supports concurrent access from multiple isolates. However, ensure you're following best practices:
+
+```dart
+// Use Hive.compute() for isolate operations
+await Hive.compute(() {
+  final box = Hive.box();
+  // Perform operations here
+  box.put('key', 'value');
+});
+```
+
+## Data corruption
+
+### Recovering from corruption
+
+Hive 4.0.0 is much more resistant to corruption than previous versions. However, if you suspect data corruption:
+
+1. Close all boxes
+2. Try reopening the box - Hive may automatically recover
+3. If recovery fails, delete the corrupted box file and recreate it
+
+<Warning>
+Always implement proper backup strategies for critical data. While Hive transactions are atomic, file system failures can still occur.
+</Warning>
+
+### Preventing corruption
+
+To minimize the risk of data corruption:
+
+1. Always use transactions for multiple related operations
+2. Don't forcefully kill the app during write operations
+3. Ensure sufficient storage space is available
+4. Use encryption to detect tampering
+
+## Encryption problems
+
+### Invalid encryption key
+
+If you receive an encryption error when opening a box:
+
+1. Verify you're using the correct encryption key
+2. Ensure the key is exactly 256 bits (32 bytes)
+3. Store keys securely using platform secure storage
+
+```dart
+// Generate a secure encryption key
+final key = Hive.generateSecureKey();
+
+// Store it securely
+await secureStorage.write(key: 'hive_key', value: base64Encode(key));
+
+// Retrieve and use it
+final storedKey = await secureStorage.read(key: 'hive_key');
+final encryptionKey = base64Decode(storedKey!);
+
+final box = Hive.box(
+  name: 'secureBox',
+  encryptionKey: encryptionKey,
+);
+```
+
+### Performance impact of encryption
+
+Encryption adds minimal overhead in Hive 4.0.0. Each database page is encrypted separately using 256-bit AES in CBC mode. If you notice performance issues, ensure you're not encrypting boxes that don't need it.
+
+## Getting help
+
+If you're still experiencing issues:
+
+1. Check the [GitHub issues](https://github.com/isar/hive/issues) for similar problems
+2. Join the [Telegram community](https://t.me/isardb) for support
+3. Create a new issue with a minimal reproducible example

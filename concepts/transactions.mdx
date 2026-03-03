@@ -1,0 +1,458 @@
+---
+title: Transactions
+description: Ensure data consistency with atomic read and write transactions
+---
+
+Transactions in Hive provide atomic operations and consistent views of your data. They ensure that multiple operations either all succeed or all fail together, maintaining data integrity even in complex scenarios.
+
+## What are transactions?
+
+A transaction is a sequence of operations that execute as a single atomic unit. In Hive, transactions provide:
+
+- **Atomicity**: All changes succeed together or fail together
+- **Consistency**: The box remains in a valid state
+- **Isolation**: Transactions see a consistent snapshot of data
+- **Performance**: Batch operations are faster in transactions
+
+<Note>
+All write operations in Hive automatically use transactions internally. The explicit transaction API gives you control over when and how transactions are created.
+</Note>
+
+## Write transactions
+
+Write transactions allow you to perform multiple write operations atomically:
+
+```dart
+final box = Hive.box();
+
+box.write(() {
+  box.put('user1', 'Alice');
+  box.put('user2', 'Bob');
+  box.put('user3', 'Charlie');
+});
+```
+
+All operations inside the callback execute as a single transaction. If any operation fails, none of the changes are applied.
+
+### Atomicity guarantee
+
+Transactions ensure all-or-nothing execution:
+
+```dart
+final box = Hive.box();
+box.put('balance', 100);
+
+try {
+  box.write(() {
+    box.put('balance', 50);
+    box.put('transaction', 'withdrawal');
+    throw Exception('Payment failed!');
+  });
+} catch (e) {
+  print('Error: $e');
+}
+
+// Balance is still 100 - changes were rolled back
+print(box.get('balance')); // 100
+```
+
+<Tip>
+If an error occurs during a write transaction, the box automatically reverts to its state before the transaction started. You don't need to manually handle rollbacks.
+</Tip>
+
+## Read transactions
+
+Read transactions provide a consistent view of the box:
+
+```dart
+final box = Hive.box();
+
+final result = box.read(() {
+  final user = box.get('user');
+  final age = box.get('age');
+  final email = box.get('email');
+  
+  return '$user ($age): $email';
+});
+
+print(result);
+```
+
+All read operations within the transaction see the same snapshot of data, even if other code modifies the box concurrently.
+
+### Consistent snapshots
+
+Read transactions protect against concurrent modifications:
+
+```dart
+final box = Hive.box();
+box.put('counter', 0);
+
+// Start a read transaction
+box.read(() {
+  final initial = box.get('counter'); // 0
+  
+  // Another part of the app modifies the box
+  // (imagine this happens concurrently)
+  box.put('counter', 100);
+  
+  // Still sees the original value inside transaction
+  final still = box.get('counter'); // 0
+  
+  print('Initial: $initial, Still: $still');
+});
+
+// Outside the transaction, we see the new value
+print(box.get('counter')); // 100
+```
+
+<Note>
+Read transactions cannot perform write operations. Attempting to write inside a read transaction throws a `StateError`.
+</Note>
+
+## Return values
+
+Both read and write transactions can return values:
+
+```dart
+final box = Hive.box();
+
+// Return from write transaction
+final success = box.write(() {
+  box.put('status', 'active');
+  box.put('timestamp', DateTime.now().toIso8601String());
+  return true;
+});
+
+print('Success: $success'); // true
+
+// Return from read transaction
+final userData = box.read(() {
+  return {
+    'name': box.get('name'),
+    'email': box.get('email'),
+    'age': box.get('age'),
+  };
+});
+
+print(userData);
+```
+
+## Nested transactions
+
+Transactions can be nested, and Hive handles them efficiently:
+
+```dart
+final box = Hive.box();
+
+box.write(() {
+  box.put('level1', 'outer');
+  
+  // Nested write transaction
+  box.write(() {
+    box.put('level2', 'inner');
+  });
+  
+  box.put('level3', 'outer again');
+});
+```
+
+Nested write transactions behave as part of the outer transaction. The entire operation is atomic.
+
+<Warning>
+You cannot start a write transaction inside a read transaction. This will throw a `StateError`:
+
+```dart
+box.read(() {
+  box.write(() { // Error!
+    box.put('key', 'value');
+  });
+});
+```
+</Warning>
+
+## Implicit transactions
+
+All box write operations automatically create transactions if you're not already in one:
+
+```dart
+final box = Hive.box();
+
+// These each create their own transaction
+box.put('a', 1);      // Transaction 1
+box.put('b', 2);      // Transaction 2
+box.delete('c');      // Transaction 3
+
+// More efficient: combine into one transaction
+box.write(() {
+  box.put('a', 1);
+  box.put('b', 2);
+  box.delete('c');
+}); // Single transaction
+```
+
+<Tip>
+When performing multiple operations, wrap them in an explicit transaction for better performance. This reduces disk I/O and improves throughput.
+</Tip>
+
+## Performance benefits
+
+Transactions significantly improve performance for batch operations:
+
+```dart
+final box = Hive.box();
+final stopwatch = Stopwatch()..start();
+
+// Slow: Each put creates a separate transaction
+for (int i = 0; i < 1000; i++) {
+  box.put('key$i', 'value$i');
+}
+print('Individual: ${stopwatch.elapsedMilliseconds}ms');
+
+stopwatch.reset();
+
+// Fast: All puts in a single transaction
+box.write(() {
+  for (int i = 0; i < 1000; i++) {
+    box.put('key$i', 'value$i');
+  }
+});
+print('Batched: ${stopwatch.elapsedMilliseconds}ms');
+```
+
+Batching operations in a single transaction can be **10-100x faster** than individual operations.
+
+## Use cases
+
+### Transferring data between keys
+
+```dart
+void transferData(Box box, String fromKey, String toKey) {
+  box.write(() {
+    final data = box.get(fromKey);
+    if (data != null) {
+      box.put(toKey, data);
+      box.delete(fromKey);
+    }
+  });
+}
+```
+
+### Updating related data
+
+```dart
+void updateUserProfile(Box box, String userId, Map<String, dynamic> updates) {
+  box.write(() {
+    // Update user data
+    final user = box.get('user_$userId') as Map<String, dynamic>;
+    user.addAll(updates);
+    box.put('user_$userId', user);
+    
+    // Update index
+    final index = box.get('userIndex') as List<String>? ?? [];
+    if (!index.contains(userId)) {
+      index.add(userId);
+      box.put('userIndex', index);
+    }
+    
+    // Update timestamp
+    box.put('lastUpdate', DateTime.now().toIso8601String());
+  });
+}
+```
+
+### Batch imports
+
+```dart
+void importData(Box box, List<Map<String, dynamic>> records) {
+  box.write(() {
+    for (final record in records) {
+      box.put(record['id'] as String, record);
+    }
+    box.put('importTimestamp', DateTime.now().toIso8601String());
+    box.put('importCount', records.length);
+  });
+}
+```
+
+### Counter with history
+
+```dart
+void incrementCounter(Box box, String counterName) {
+  box.write(() {
+    final current = box.get(counterName, defaultValue: 0) as int;
+    final next = current + 1;
+    
+    // Update counter
+    box.put(counterName, next);
+    
+    // Update history
+    final history = box.get('${counterName}_history', defaultValue: <int>[]) as List<int>;
+    history.add(next);
+    box.put('${counterName}_history', history);
+    
+    // Update metadata
+    box.put('${counterName}_lastUpdate', DateTime.now().toIso8601String());
+  });
+}
+```
+
+## Error handling
+
+Handle errors gracefully in transactions:
+
+```dart
+final box = Hive.box();
+
+try {
+  final result = box.write(() {
+    box.put('step1', 'complete');
+    
+    // Validate before continuing
+    if (!isValid(box.get('config'))) {
+      throw Exception('Invalid configuration');
+    }
+    
+    box.put('step2', 'complete');
+    return true;
+  });
+  
+  print('Transaction succeeded: $result');
+} catch (e) {
+  print('Transaction failed: $e');
+  // Box state is unchanged
+}
+```
+
+<Note>
+When a transaction throws an exception, all changes are automatically rolled back. The box returns to its state before the transaction began.
+</Note>
+
+## Transactions with custom objects
+
+Transactions work seamlessly with custom objects:
+
+```dart
+class TodoItem {
+  TodoItem({required this.id, required this.title, required this.done});
+
+  factory TodoItem.fromJson(Map<String, dynamic> json) {
+    return TodoItem(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      done: json['done'] as bool,
+    );
+  }
+
+  final String id;
+  final String title;
+  final bool done;
+
+  Map<String, dynamic> toJson() {
+    return {'id': id, 'title': title, 'done': done};
+  }
+}
+
+Hive.registerAdapter('TodoItem', TodoItem.fromJson);
+
+final box = Hive.box();
+
+// Atomic batch update
+box.write(() {
+  final todo1 = TodoItem(id: '1', title: 'Buy milk', done: false);
+  final todo2 = TodoItem(id: '2', title: 'Write code', done: false);
+  final todo3 = TodoItem(id: '3', title: 'Deploy app', done: false);
+  
+  box.put('todo_1', todo1);
+  box.put('todo_2', todo2);
+  box.put('todo_3', todo3);
+  
+  // Update index
+  box.put('todoIds', ['1', '2', '3']);
+});
+```
+
+## Read-write patterns
+
+Sometimes you need to read data before deciding what to write:
+
+```dart
+void incrementOrCreate(Box box, String key, int increment) {
+  box.write(() {
+    // Read inside write transaction
+    final current = box.get(key, defaultValue: 0) as int;
+    box.put(key, current + increment);
+  });
+}
+
+void conditionalUpdate(Box box, String key, dynamic value) {
+  box.write(() {
+    // Only update if key doesn't exist
+    if (!box.containsKey(key)) {
+      box.put(key, value);
+    }
+  });
+}
+```
+
+<Tip>
+It's safe to read inside write transactions. The write transaction provides both read and write capabilities.
+</Tip>
+
+## Best practices
+
+<Tip>
+**Batch operations**: When performing multiple writes, always use an explicit transaction for better performance.
+</Tip>
+
+<Tip>
+**Keep transactions short**: Long-running transactions can block other operations. Perform only necessary work inside transactions.
+</Tip>
+
+<Tip>
+**Handle errors appropriately**: Wrap transactions in try-catch blocks to handle failures gracefully.
+</Tip>
+
+<Warning>
+**Avoid expensive operations**: Don't perform network requests, heavy computations, or UI updates inside transactions. Keep them focused on data operations.
+</Warning>
+
+```dart
+// Bad: Network call in transaction
+box.write(() {
+  final data = await fetchFromNetwork(); // Don't do this!
+  box.put('data', data);
+});
+
+// Good: Fetch first, then transact
+final data = await fetchFromNetwork();
+box.write(() {
+  box.put('data', data);
+});
+```
+
+## Transactions and isolates
+
+Transactions work correctly across isolates:
+
+```dart
+final box = Hive.box();
+box.put('counter', 0);
+
+// Run transaction in background isolate
+await Hive.compute(() {
+  final box = Hive.box();
+  
+  box.write(() {
+    final current = box.get('counter', defaultValue: 0) as int;
+    box.put('counter', current + 1);
+  });
+});
+
+// See the updated value
+print(box.get('counter')); // 1
+```
+
+<Note>
+Each isolate gets its own view of the box, but transactions ensure consistency across isolates. Changes committed in one isolate are visible to others after the transaction completes.
+</Note>

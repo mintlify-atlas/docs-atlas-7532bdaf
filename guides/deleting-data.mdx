@@ -1,0 +1,372 @@
+---
+title: Deleting data
+description: Learn how to remove data using delete(), clear(), and deleteFromDisk()
+---
+
+Hive provides several methods for removing data from your boxes, from deleting individual entries to completely wiping a box from disk.
+
+## Deleting single entries
+
+Remove individual entries using the `delete()` method:
+
+```dart
+final box = Hive.box();
+
+box.put('username', 'Alice');
+box.put('email', 'alice@example.com');
+
+final deleted = box.delete('username');
+print('Was deleted: $deleted'); // true
+
+print(box.get('username')); // null
+print(box.get('email'));    // alice@example.com
+```
+
+The method returns `true` if the key existed and was deleted, `false` if the key didn't exist.
+
+### Safe deletion
+
+`delete()` is safe to call even if the key doesn't exist:
+
+```dart
+final result = box.delete('nonexistent');
+print(result); // false
+
+// No error thrown
+```
+
+## Deleting by index
+
+Remove entries by their position using `deleteAt()`:
+
+```dart
+final box = Hive.box();
+
+box.addAll(['First', 'Second', 'Third']);
+print(box.length); // 3
+
+box.deleteAt(1);
+print(box.length);  // 2
+print(box.getAt(0)); // First
+print(box.getAt(1)); // Third (was at index 2)
+```
+
+<Warning>
+  `deleteAt()` throws an exception if the index is out of bounds. Always check the box length before deleting by index.
+</Warning>
+
+### Safe index deletion
+
+```dart
+if (index >= 0 && index < box.length) {
+  box.deleteAt(index);
+} else {
+  print('Index out of bounds');
+}
+```
+
+## Deleting multiple entries
+
+Remove multiple keys at once using `deleteAll()`:
+
+```dart
+final box = Hive.box();
+
+box.putAll({
+  'user1': 'Alice',
+  'user2': 'Bob',
+  'user3': 'Charlie',
+  'admin': 'David',
+});
+
+final count = box.deleteAll(['user1', 'user2', 'user3']);
+print('Deleted $count entries'); // Deleted 3 entries
+
+print(box.containsKey('user1')); // false
+print(box.containsKey('admin')); // true
+```
+
+The method returns the number of entries actually deleted. Non-existent keys are skipped:
+
+```dart
+final count = box.deleteAll(['existing', 'nonexistent', 'another']);
+print('Deleted: $count'); // Only counts keys that existed
+```
+
+## Deleting ranges
+
+Remove consecutive entries using `deleteRange()`:
+
+```dart
+final box = Hive.box();
+
+box.addAll(['A', 'B', 'C', 'D', 'E']);
+print(box.length); // 5
+
+box.deleteRange(1, 4);
+print(box.length);  // 2
+print(box.getAt(0)); // A
+print(box.getAt(1)); // E
+```
+
+The `end` index is exclusive, similar to Dart's list slicing.
+
+## Clearing all data
+
+Remove all entries from a box while keeping the box open:
+
+```dart
+final box = Hive.box();
+
+box.putAll({
+  'key1': 'value1',
+  'key2': 'value2',
+  'key3': 'value3',
+});
+
+print(box.length); // 3
+box.clear();
+print(box.length); // 0
+print(box.isOpen); // true
+```
+
+### Clearing without notifications
+
+By default, `clear()` notifies all listeners. You can disable this:
+
+```dart
+box.clear(notify: false);
+```
+
+This is useful when you want to clear data without triggering watch streams.
+
+## Deleting the box from disk
+
+Completely remove a box and its file from storage:
+
+```dart
+final box = Hive.box(name: 'temp');
+
+box.put('data', 'some value');
+
+// Delete the box and close it
+box.deleteFromDisk();
+
+print(box.isOpen); // false
+```
+
+<Warning>
+  `deleteFromDisk()` closes the box and removes its file. If the box is still open in another isolate, it won't be deleted. After calling this method, you cannot use the box instance anymore.
+</Warning>
+
+## Deletion patterns
+
+<Tabs>
+  <Tab title="Conditional deletion">
+    Delete entries based on conditions:
+
+    ```dart
+    final box = Hive.box();
+
+    // Delete all entries with specific criteria
+    final keysToDelete = <String>[];
+
+    for (final key in box.keys) {
+      final value = box.get(key);
+      if (value is int && value < 0) {
+        keysToDelete.add(key);
+      }
+    }
+
+    final deleted = box.deleteAll(keysToDelete);
+    print('Removed $deleted negative values');
+    ```
+  </Tab>
+
+  <Tab title="Expiring data">
+    Delete old entries based on timestamps:
+
+    ```dart
+    final box = Hive.box();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final oneDayAgo = now - (24 * 60 * 60 * 1000);
+
+    final expiredKeys = <String>[];
+
+    for (final key in box.keys) {
+      if (key.startsWith('cache_')) {
+        final timestamp = int.tryParse(key.split('_').last) ?? 0;
+        if (timestamp < oneDayAgo) {
+          expiredKeys.add(key);
+        }
+      }
+    }
+
+    box.deleteAll(expiredKeys);
+    ```
+  </Tab>
+
+  <Tab title="Batch deletion">
+    Delete entries in batches for better performance:
+
+    ```dart
+    final box = Hive.box();
+    final allKeys = box.keys.toList();
+    final batchSize = 100;
+
+    for (var i = 0; i < allKeys.length; i += batchSize) {
+      final batch = allKeys.skip(i).take(batchSize);
+      box.deleteAll(batch);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Transaction-safe deletion
+
+Use transactions to ensure atomic deletions:
+
+```dart
+final box = Hive.box();
+
+box.write(() {
+  box.delete('user');
+  box.delete('session');
+  box.delete('preferences');
+});
+```
+
+If any deletion fails, all changes are rolled back:
+
+```dart
+try {
+  box.write(() {
+    box.delete('key1');
+    box.deleteAt(0);
+    throw Exception('Something went wrong');
+    box.delete('key2'); // Never executed
+  });
+} catch (e) {
+  print('Deletion transaction failed');
+  // All deletions rolled back
+}
+```
+
+## Cleanup strategies
+
+<Steps>
+  <Step title="Regular maintenance">
+    Periodically clean up unused data:
+
+    ```dart
+    void cleanupBox(Box box) {
+      final keysToDelete = <String>[];
+
+      for (final key in box.keys) {
+        if (key.startsWith('temp_')) {
+          keysToDelete.add(key);
+        }
+      }
+
+      if (keysToDelete.isNotEmpty) {
+        box.deleteAll(keysToDelete);
+        print('Cleaned up ${keysToDelete.length} temporary entries');
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Size management">
+    Keep box size under control:
+
+    ```dart
+    void limitBoxSize(Box box, int maxEntries) {
+      if (box.length > maxEntries) {
+        final entriesToRemove = box.length - maxEntries;
+        box.deleteRange(0, entriesToRemove);
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Cascading deletes">
+    Delete related entries together:
+
+    ```dart
+    void deleteUser(Box box, String userId) {
+      box.write(() {
+        box.delete('user_$userId');
+        box.delete('profile_$userId');
+        box.delete('settings_$userId');
+      });
+    }
+    ```
+  </Step>
+</Steps>
+
+## Closing vs. deleting
+
+Understand the difference between closing and deleting:
+
+<CodeGroup>
+```dart Closing
+// Closes the box but keeps the file
+box.close();
+
+// Can reopen later
+final reopened = Hive.box(name: 'myBox');
+print(reopened.length); // Data still exists
+```
+
+```dart Deleting
+// Removes the box and its file
+box.deleteFromDisk();
+
+// Opening creates a new empty box
+final newBox = Hive.box(name: 'myBox');
+print(newBox.length); // 0
+```
+
+```dart Clearing
+// Removes all entries but keeps the box open
+box.clear();
+
+print(box.isOpen); // true
+print(box.length); // 0
+```
+</CodeGroup>
+
+## Error handling
+
+Handle potential errors during deletion:
+
+```dart
+try {
+  box.deleteAt(index);
+} catch (e) {
+  if (e is RangeError) {
+    print('Index out of bounds');
+  } else {
+    print('Deletion failed: $e');
+  }
+}
+
+// Check before deleting
+if (box.isOpen) {
+  box.delete('key');
+} else {
+  print('Cannot delete: box is closed');
+}
+
+// Verify deletion
+if (box.delete('key')) {
+  print('Successfully deleted');
+} else {
+  print('Key did not exist');
+}
+```
+
+Common issues:
+- Deleting from a closed box
+- Index out of bounds with `deleteAt()`
+- Accessing deleted data without checking existence first

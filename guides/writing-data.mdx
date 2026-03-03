@@ -1,0 +1,364 @@
+---
+title: Writing data
+description: Learn how to store data in Hive using put(), add(), and putAll() operations
+---
+
+Hive provides flexible methods for writing data to your boxes. Whether you're storing single values, multiple entries, or auto-generating keys, Hive makes it simple.
+
+## Basic key-value storage
+
+At its core, a Hive box is a persisted `Map<String, dynamic>`. Use `put()` to store values with string keys:
+
+```dart
+final box = Hive.box();
+box.put('username', 'Alice');
+box.put('score', 1337);
+box.put('isActive', true);
+```
+
+If a key already exists, `put()` updates its value:
+
+```dart
+box.put('score', 1337);
+print(box.get('score')); // 1337
+
+box.put('score', 2000);
+print(box.get('score')); // 2000
+```
+
+## The bracket operator
+
+For a more familiar syntax, use the `[]=` operator:
+
+```dart
+box['username'] = 'Bob';
+box['email'] = 'bob@example.com';
+box['age'] = 25;
+```
+
+This is functionally identical to using `put()`.
+
+## Storing complex types
+
+Hive can store any Dart primitive, as well as lists and maps:
+
+<CodeGroup>
+```dart Lists
+box.put('favorites', ['Reading', 'Gaming', 'Coding']);
+box.put('scores', [95, 87, 92, 88]);
+```
+
+```dart Maps
+box.put('settings', {
+  'theme': 'dark',
+  'notifications': true,
+  'language': 'en',
+});
+
+box.put('profile', {
+  'name': 'Alice',
+  'bio': 'Developer',
+  'joined': '2024-01-01',
+});
+```
+
+```dart Nested structures
+box.put('userData', {
+  'profile': {
+    'name': 'Alice',
+    'age': 25,
+  },
+  'preferences': {
+    'theme': 'dark',
+    'notifications': ['email', 'push'],
+  },
+});
+```
+</CodeGroup>
+
+## Writing multiple values
+
+Use `putAll()` to write multiple key-value pairs at once:
+
+```dart
+box.putAll({
+  'firstName': 'John',
+  'lastName': 'Doe',
+  'email': 'john.doe@example.com',
+  'age': 30,
+});
+```
+
+This is more efficient than calling `put()` multiple times.
+
+## Auto-increment keys
+
+When you don't need explicit keys, use `add()` to automatically generate them:
+
+```dart
+final box = Hive.box();
+
+box.add('First entry');
+box.add('Second entry');
+box.add('Third entry');
+
+print(box.getAt(0)); // First entry
+print(box.getAt(1)); // Second entry
+print(box.getAt(2)); // Third entry
+```
+
+Auto-generated keys are strings in the format `hive_<timestamp>_<counter>`.
+
+### Adding multiple values
+
+Use `addAll()` to add multiple entries with auto-generated keys:
+
+```dart
+box.addAll([
+  'Apple',
+  'Banana',
+  'Cherry',
+  'Date',
+]);
+
+print(box.length); // 4
+```
+
+## Writing by index
+
+Update values at specific indices using `putAt()`:
+
+```dart
+final box = Hive.box();
+
+box.add('Original');
+print(box.getAt(0)); // Original
+
+box.putAt(0, 'Updated');
+print(box.getAt(0)); // Updated
+```
+
+<Warning>
+  `putAt()` throws an exception if the index doesn't exist. Use it only to update existing entries, not to add new ones.
+</Warning>
+
+You can also use the bracket operator with indices:
+
+```dart
+box.add('First');
+box[0] = 'Modified First';
+```
+
+## Writing ranges
+
+Overwrite multiple consecutive values using `putRange()`:
+
+```dart
+final box = Hive.box();
+
+box.addAll(['A', 'B', 'C', 'D', 'E']);
+box.putRange(1, 4, ['X', 'Y', 'Z']);
+
+print(box.getRange(0, 5)); // [A, X, Y, Z, E]
+```
+
+The `end` index is exclusive, and the number of values must match the range size.
+
+## Storing custom objects
+
+To store custom Dart objects, implement `fromJson()` and `toJson()` methods:
+
+<Steps>
+  <Step title="Define your class">
+    ```dart
+    class Todo {
+      final String title;
+      final bool completed;
+
+      Todo({required this.title, required this.completed});
+
+      factory Todo.fromJson(Map<String, dynamic> json) => Todo(
+        title: json['title'] as String,
+        completed: json['completed'] as bool,
+      );
+
+      Map<String, dynamic> toJson() => {
+        'title': title,
+        'completed': completed,
+      };
+    }
+    ```
+  </Step>
+
+  <Step title="Register the adapter">
+    ```dart
+    Hive.registerAdapter('Todo', Todo.fromJson);
+    ```
+  </Step>
+
+  <Step title="Store objects">
+    ```dart
+    final box = Hive.box();
+
+    final todo = Todo(
+      title: 'Learn Hive',
+      completed: true,
+    );
+
+    box.put('todo_1', todo);
+
+    // Store multiple objects
+    box.addAll([
+      Todo(title: 'Task 1', completed: false),
+      Todo(title: 'Task 2', completed: true),
+      Todo(title: 'Task 3', completed: false),
+    ]);
+    ```
+  </Step>
+</Steps>
+
+## Type-safe writing
+
+Use typed boxes to ensure type safety:
+
+```dart
+final box = Hive.box<String>(name: 'strings');
+
+box.put('greeting', 'Hello');     // ✓ OK
+box.put('name', 'Alice');          // ✓ OK
+box.put('count', 42);              // ✗ Error: int is not String
+```
+
+This prevents accidentally storing values of the wrong type.
+
+## Atomic writes with transactions
+
+Use write transactions to ensure all operations succeed or fail together:
+
+```dart
+final box = Hive.box();
+
+box.write(() {
+  box.put('user', 'Alice');
+  box.put('email', 'alice@example.com');
+  box.put('verified', true);
+});
+```
+
+If any operation fails, all changes are rolled back:
+
+```dart
+box.put('balance', 100);
+
+try {
+  box.write(() {
+    box.put('balance', 50);
+    throw Exception('Payment failed');
+    box.put('lastTransaction', 'Purchase'); // Never executed
+  });
+} catch (e) {
+  print('Transaction failed');
+}
+
+print(box.get('balance')); // Still 100
+```
+
+## Mixing keys and indices
+
+You can freely mix key-based and index-based writes:
+
+```dart
+final box = Hive.box();
+
+// Add with auto-generated key
+box.add('First');
+
+// Add with explicit key
+box.put('named', 'Second');
+
+// Add another auto-generated
+box.add('Third');
+
+print(box.getAt(0)); // First
+print(box.getAt(1)); // Second
+print(box.getAt(2)); // Third
+```
+
+## Performance optimization
+
+<Tabs>
+  <Tab title="Batch writes">
+    Use `putAll()` or `addAll()` for better performance:
+
+    ```dart
+    // Good: Single operation
+    box.putAll({
+      'key1': 'value1',
+      'key2': 'value2',
+      'key3': 'value3',
+    });
+
+    // Less efficient: Multiple operations
+    box.put('key1', 'value1');
+    box.put('key2', 'value2');
+    box.put('key3', 'value3');
+    ```
+  </Tab>
+
+  <Tab title="Transactions">
+    Group related writes in transactions:
+
+    ```dart
+    box.write(() {
+      for (var i = 0; i < 100; i++) {
+        box.put('key_$i', 'value_$i');
+      }
+    });
+    ```
+  </Tab>
+
+  <Tab title="Size limits">
+    Set appropriate `maxSizeMiB` when opening boxes:
+
+    ```dart
+    final box = Hive.box(
+      name: 'large_data',
+      maxSizeMiB: 50,
+    );
+    ```
+  </Tab>
+</Tabs>
+
+## Error handling
+
+Handle common write errors:
+
+```dart
+try {
+  box.put('key', value);
+} catch (e) {
+  print('Failed to write: $e');
+}
+
+// Check if box is open
+if (box.isOpen) {
+  box.put('key', 'value');
+} else {
+  print('Box is closed');
+}
+
+// Handle size limits
+try {
+  box.putAll(largeData);
+} catch (e) {
+  if (e.toString().contains('size')) {
+    print('Box size limit exceeded');
+  }
+}
+```
+
+Common issues:
+- Writing to a closed box
+- Exceeding `maxSizeMiB` limit
+- Type mismatches in typed boxes
+- Invalid index in `putAt()` operations

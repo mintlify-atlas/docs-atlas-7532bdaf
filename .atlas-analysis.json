@@ -1,0 +1,120 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Hive",
+  "projectDescription": "Lightweight and blazing-fast key-value database for Flutter and Dart",
+  "theme": "palm",
+  "primaryColor": "#FFA000",
+  "lightColor": "#FFCA28",
+  "darkColor": "#FF8F00",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/boxes",
+              "concepts/data-types",
+              "concepts/encryption",
+              "concepts/transactions",
+              "concepts/isolates"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/opening-boxes",
+              "guides/reading-data",
+              "guides/writing-data",
+              "guides/deleting-data",
+              "guides/custom-objects",
+              "guides/type-safety",
+              "guides/list-operations",
+              "guides/watching-changes"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/multi-isolate",
+              "advanced/encryption",
+              "advanced/transactions",
+              "advanced/performance",
+              "advanced/migration"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": [
+              "api/hive",
+              "api/box"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/flutter-app",
+              "examples/custom-types",
+              "examples/encrypted-box"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Resources",
+        "groups": [
+          {
+            "group": "Additional Resources",
+            "pages": [
+              "faq",
+              "troubleshooting",
+              "changelog"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Cross-platform support (mobile, desktop, browser)",
+    "Blazing-fast performance built on Isar",
+    "256-bit AES encryption",
+    "Multi-isolate support",
+    "Type-safe boxes with generics",
+    "Atomic transactions",
+    "No code generation required",
+    "Simple and intuitive API"
+  ],
+  "publicApiSurface": [
+    "Hive.box()",
+    "Hive.registerAdapter()",
+    "Hive.compute()",
+    "Hive.closeAllBoxes()",
+    "Hive.deleteAllBoxesFromDisk()",
+    "Box.get()",
+    "Box.put()",
+    "Box.delete()",
+    "Box.add()",
+    "Box.clear()",
+    "Box.read()",
+    "Box.write()",
+    "Box.watch()",
+    "Box.watchKey()",
+    "Box.close()",
+    "Box.deleteFromDisk()"
+  ]
+}
